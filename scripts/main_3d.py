@@ -29,6 +29,8 @@ from monai.metrics import DiceMetric
 from monai.transforms import (
     Activations,
     AsChannelFirstd,
+    RandSpatialCropd,
+    Spacingd,
     AsDiscrete,
     Resized,
     Compose,
@@ -39,7 +41,8 @@ from monai.transforms import (
     EnsureTyped,
     EnsureType,
     MapTransform,
-    AddChanneld
+    AddChanneld,
+    NormalizeIntensityd
 )
 from monai.visualize import plot_2d_or_3d_image
 
@@ -115,18 +118,22 @@ def main(tempdir):
     train_transforms = Compose(
         [
             LoadImaged(keys=["img", "seg"]),
-
-            # Resized(keys=['img', 'seg'], spatial_size=(
-            #     320, 320, 150)),
-            # AsChannelFirstd(keys=["img", "seg"], channel_dim=-1),
             AddChanneld(keys=['img', 'seg']),
-            # DebugTransform(keys=['img', 'seg']),
-            ScaleIntensityd(keys="img"),
-            RandCropByPosNegLabeld(
-                keys=["img", "seg"], label_key="seg", spatial_size=[64, 64, 64], pos=1, neg=1, num_samples=4
+            Spacingd(
+                keys=["img", "seg"],
+                pixdim=(1.0, 1.0, 1.0),
+                mode=("bilinear", "nearest"),
             ),
-            Resized(keys=['img', 'seg'], spatial_size=[
-                    64, 64, 64], mode=('area', 'nearest')),
+            # DebugTransform(keys=['img', 'seg']),
+            # ScaleIntensityd(keys="img"),
+            # RandCropByPosNegLabeld(
+            #     keys=["img", "seg"], label_key="seg", spatial_size=[64, 64, 64], pos=1, neg=1, num_samples=4
+            # ),
+            RandSpatialCropd(keys=["img", "seg"], roi_size=[
+                             112, 112, 64], random_size=False),
+            NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
+            # Resized(keys=['img', 'seg'], spatial_size=[
+            #         64, 64, 64], mode=('area', 'nearest')),
             RandRotate90d(keys=["img", "seg"], prob=0.5, spatial_axes=[0, 2]),
             ConvertToMultiChanneld(keys=['seg']),
             EnsureTyped(keys=["img", "seg"]),
@@ -135,11 +142,15 @@ def main(tempdir):
     val_transforms = Compose(
         [
             LoadImaged(keys=["img", "seg"]),
-            # Resized(keys=['img', 'seg'], spatial_size=(
-            #     320, 320, 150), mode=('area', 'nearest')),
             AddChanneld(keys=['img', 'seg']),
+            Spacingd(
+                keys=["img", "seg"],
+                pixdim=(1.0, 1.0, 1.0),
+                mode=("bilinear", "nearest"),
+            ),
             # AsChannelFirstd(keys=["img", "seg"], channel_dim=-1),
-            ScaleIntensityd(keys="img"),
+            # ScaleIntensityd(keys="img"),
+            NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
             ConvertToMultiChanneld(keys=['seg']),
             EnsureTyped(keys=["img", "seg"]),
         ]
@@ -158,7 +169,7 @@ def main(tempdir):
     # use batch_size=2 to load images and use RandCropByPosNegLabeld to generate 2 x 4 images for network training
     train_loader = DataLoader(
         train_ds,
-        batch_size=32,
+        batch_size=16,
         shuffle=True,
         num_workers=4,
         collate_fn=list_data_collate,
@@ -242,7 +253,7 @@ def main(tempdir):
                 for val_data in val_loader:
                     val_images, val_labels = val_data["img"].to(
                         device), val_data["seg"].to(device)
-                    roi_size = (64, 64, 64)
+                    roi_size = (112, 112, 64)
                     sw_batch_size = 4
                     val_outputs = sliding_window_inference(
                         val_images, roi_size, sw_batch_size, model)

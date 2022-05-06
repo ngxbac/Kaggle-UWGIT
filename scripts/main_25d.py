@@ -166,6 +166,10 @@ def get_model(args, distributed=True):
 def train(args):
     utils.init_distributed_mode(args)
     utils.fix_random_seeds(args.seed)
+    # lr = (args.lr / 64) * torch.distributed.get_world_size() * \
+    #     args.batch_size_per_gpu
+
+    # args.lr = lr
     print("git:\n  {}\n".format(utils.get_sha()))
     print("\n".join("%s: %s" % (k, str(v))
           for k, v in sorted(dict(vars(args)).items())))

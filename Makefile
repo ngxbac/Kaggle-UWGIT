@@ -3,9 +3,9 @@ fold=0
 backbone=efficientnet-b0
 batch_size=32
 input_size=320,384
-epochs=15
+epochs=30
 NCCL_P2P_DISABLE=0
-output_dir=./logs/25D/Unet/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_bndist_lr2e3
+output_dir=./logs/25D/Unet/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_bndist_lr2e3_scale
 
 train:
 	CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE} PYTHONPATH=. \

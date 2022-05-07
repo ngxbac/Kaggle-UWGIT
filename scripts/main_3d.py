@@ -178,7 +178,7 @@ def main(tempdir):
     # use batch_size=2 to load images and use RandCropByPosNegLabeld to generate 2 x 4 images for network training
     train_loader = DataLoader(
         train_ds,
-        batch_size=16,
+        batch_size=4,
         shuffle=True,
         num_workers=4,
         collate_fn=list_data_collate,
@@ -203,24 +203,29 @@ def main(tempdir):
     #     num_res_units=2,
     # ).to(device)
 
-    model = monai.networks.nets.SegResNet(
-        blocks_down=[1, 2, 2, 4],
-        blocks_up=[1, 1, 1],
-        init_filters=16,
-        in_channels=1,
-        out_channels=3,
-        dropout_prob=0.2,
+    # model = monai.networks.nets.SegResNet(
+    #     blocks_down=[1, 2, 2, 4],
+    #     blocks_up=[1, 1, 1],
+    #     init_filters=16,
+    #     in_channels=1,
+    #     out_channels=3,
+    #     dropout_prob=0.2,
+    # ).to(device)
+
+    model = monai.networks.nets.UNETR(
+        in_channels=1, out_channels=3, img_size=roi_size,
+        feature_size=32
     ).to(device)
     loss_function = monai.losses.DiceLoss(
         smooth_nr=0, smooth_dr=1e-5, squared_pred=True, to_onehot_y=False, sigmoid=True)
     optimizer = torch.optim.Adam(model.parameters(), 1e-3)
 
-    num_epochs = 100
+    num_epochs = 300
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=num_epochs * len(train_loader))
 
     # start a typical PyTorch training
-    val_interval = 5
+    val_interval = 1
     best_metric = -1
     best_metric_epoch = -1
     epoch_loss_values = list()

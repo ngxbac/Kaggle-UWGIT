@@ -5,8 +5,16 @@ import os
 import numpy as np
 
 
+def get_spacing(path):
+    filename = path.split("/")[-1][:-4]
+    spacing_x = float(filename.split("_")[-2])
+    spacing_y = float(filename.split("_")[-1])
+
+    return (spacing_x, spacing_y, 1.5)
+
+
 data_dir = "data/uw-madison-gi-tract-image-segmentation/train/"
-save_dir = "data/nii-data/train/"
+save_dir = "data/nii-data-2/train/"
 all_cases = os.listdir(data_dir)
 for case in all_cases:
     case_dir = f"{data_dir}/{case}"
@@ -17,6 +25,7 @@ for case in all_cases:
         all_frames = sorted(all_frames)
         frames = []
         for frame in all_frames:
+            spacing = get_spacing(frame)
             frame = cv2.imread(frame, cv2.IMREAD_UNCHANGED)
             frames.append(frame)
 
@@ -26,7 +35,9 @@ for case in all_cases:
         # frames.SetDirection(direction)
 
         frames.SetOrigin((0.0, 0.0, 0.0))
-        frames.SetSpacing((1.5, 1.5, 1.5))
+        frames.SetSpacing(spacing)
+
+        print(spacing)
 
         save_case_dir = f"{save_dir}/{case}/"
         os.makedirs(save_case_dir, exist_ok=True)

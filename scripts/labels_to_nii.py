@@ -10,7 +10,7 @@ import pandas as pd
 
 data_dir = "data/uw-madison-gi-tract-image-segmentation/"
 src = f'{data_dir}/train'
-save_dir = "data/nii-data/mask/"
+save_dir = "data/nii-data-2/mask/"
 
 train = pd.read_csv(f'{data_dir}/train.csv')
 
@@ -206,6 +206,10 @@ data.to_csv('data.csv', index=False)
 data['case'] = data['id'].apply(lambda x: x.split("_")[0])
 data['slice'] = data['id'].apply(lambda x: x.split("_")[-1])
 data['day'] = data['id'].apply(lambda x: x.split("_")[1])
+data['space_x'] = data['path'].apply(
+    lambda x: float(x.split("/")[-1][:-4].split("_")[-2]))
+data['space_y'] = data['path'].apply(
+    lambda x: float(x.split("/")[-1][:-4].split("_")[-1]))
 
 
 def rle_decode(rle, mask, fill=255):
@@ -232,23 +236,26 @@ for case in all_cases:
         all_masks = day_df['mask'].values
         all_sizes = day_df['size'].values
         all_classes = day_df['class'].values
+        space_xs = day_df['space_x'].values
+        space_ys = day_df['space_y'].values
 
         masks = []
 
         assert len(all_masks) % 3 == 0
 
         count = 0
-        for mask, size, class_id in zip(all_masks, all_sizes, all_classes):
+        for mask, size, class_id, space_x, space_y in zip(all_masks, all_sizes, all_classes, space_xs, space_ys):
             h = int(size[0])
             w = int(size[1])
 
             if h == 360 and w == 310:
                 h = 310
                 w = 360
-                print("aaa")
 
             if count == 0:
                 mask_array = np.zeros(h*w, dtype=np.uint8)
+                sx = space_x
+                sy = space_y
 
             if class_id == 'stomach':
                 label = 1
@@ -270,11 +277,11 @@ for case in all_cases:
                 masks.append(mask_array)
                 count = 0
 
-        print(len(masks), h, w)
+        print(len(masks), h, w, sx, sy)
         masks = SimpleITK.GetImageFromArray(masks)
 
         masks.SetOrigin((0.0, 0.0, 0.0))
-        masks.SetSpacing((1.5, 1.5, 1.5))
+        masks.SetSpacing((sx, sy, 1.5))
 
         save_case_dir = f"{save_dir}/{case}/"
         os.makedirs(save_case_dir, exist_ok=True)

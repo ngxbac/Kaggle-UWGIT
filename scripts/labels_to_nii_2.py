@@ -40,10 +40,21 @@ def rle_decode(rle, mask, fill=255):
     return mask
 
 
+def merge_multi(mask_multi, mask):
+    label_idx = np.where(mask != 0)[0]
+
+    not_assigned_idx = label_idx[np.where(mask_multi[label_idx] == 0)[0]]
+    assigned_idx = label_idx[np.where(mask_multi[label_idx] != 0)[0]]
+    mask_multi[not_assigned_idx] = mask[not_assigned_idx]
+    mask_multi[assigned_idx] += mask[assigned_idx] + 1
+
+    return mask_multi
+
+
 data_dir = "data/uw-madison-gi-tract-image-segmentation/train/"
 df = pd.read_csv(f"{data_dir}/../train.csv")
 
-save_dir = "data/nii-data-2/mask/"
+save_dir = "data/nii-data-2/mask-multi/"
 all_cases = os.listdir(data_dir)
 for case in all_cases:
     case_dir = f"{data_dir}/{case}"
@@ -65,9 +76,10 @@ for case in all_cases:
                 h = 310
                 w = 360
 
-            mask_array = np.zeros(h*w, dtype=np.uint8)
+            mask_array_multi = np.zeros(h*w, dtype=np.uint8)
 
             for class_id, segmentation in zip(class_ids, segmentations):
+                mask_array = np.zeros(h*w, dtype=np.uint8)
                 if class_id == 'stomach':
                     label = 1
                 elif class_id == 'small_bowel':
@@ -79,10 +91,14 @@ for case in all_cases:
                     mask_array = rle_decode(
                         rle=segmentation, mask=mask_array, fill=label)
 
-            mask_array = mask_array.reshape(h, w)
-            mask_array = np.ascontiguousarray(mask_array)
-            frames.append(mask_array)
-        print(len(frames), h, w, spacing)
+                mask_array_multi = merge_multi(mask_array_multi, mask_array)
+
+            mask_array_multi = mask_array_multi.reshape(h, w)
+            mask_array_multi = np.ascontiguousarray(mask_array_multi)
+            frames.append(mask_array_multi)
+
+        frames = np.array(frames)
+        print(len(frames), np.unique(frames), h, w, spacing)
         frames = SimpleITK.GetImageFromArray(frames)
 
         frames.SetOrigin((0.0, 0.0, 0.0))

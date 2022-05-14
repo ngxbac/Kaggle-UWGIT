@@ -20,3 +20,31 @@ train:
 	--epochs ${epochs} \
 	--use_fp16 False
 
+
+roi_size=128
+batch_size_3d=1
+epochs_3d=300
+space=1.5
+model=segresnet
+logdir=logs/3d/pilot/${model}_${roi_size}_${space}_${fold}_moreaug_${epochs_3d}ep
+
+train_3d:
+	CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE} PYTHONPATH=. \
+	python -u -m torch.distributed.launch --nproc_per_node=8 --master_port 2106 scripts/main_3d.py \
+    --feature_size=32 \
+    --batch_size=1 \
+    --roi_x ${roi_size} \
+    --roi_y ${roi_size} \
+    --roi_z 80 \
+    --space_x ${space} \
+    --space_y ${space} \
+    --space_z ${space} \
+    --model_name ${model} \
+    --fold ${fold} \
+    --out_channels 3 \
+    --infer_overlap=0.5 \
+    --data_dir=data/nii-data-2 \
+	--output_dir ${logdir} \
+	--batch_size_per_gpu ${batch_size_3d} \
+	--epochs ${epochs_3d} \
+	--use_fp16 False	

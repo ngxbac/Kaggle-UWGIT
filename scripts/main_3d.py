@@ -9,304 +9,483 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
-import os
-import sys
-import tempfile
-from glob import glob
-from sklearn.model_selection import KFold
-
 import nibabel as nib
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
 
-import monai
-from monai.data import create_test_image_3d, list_data_collate, decollate_batch
+
+import argparse
+import os
+import sys
+import datetime
+import time
+import math
+import json
+from pathlib import Path
+
+import torch
+import torch.nn as nn
+import torch.backends.cudnn as cudnn
+import numpy as np
+from utils import dino as utils
+from datasets.dataset3d import get_loader
+from functools import partial
+import timm
+
 from monai.inferers import sliding_window_inference
-from monai.metrics import DiceMetric
-from monai.transforms import (
-    Activations,
-    AsChannelFirstd,
-    RandSpatialCropd,
-    Spacingd,
-    AsDiscrete,
-    Resized,
-    Compose,
-    LoadImaged,
-    RandCropByPosNegLabeld,
-    RandRotate90d,
-    ScaleIntensityd,
-    EnsureTyped,
-    EnsureType,
-    MapTransform,
-    AddChanneld,
-    NormalizeIntensityd,
-    Orientationd,
-    ResizeWithPadOrCropd
-)
-from monai.visualize import plot_2d_or_3d_image
+from monai.losses import DiceLoss, DiceCELoss, DiceFocalLoss
+from monai.metrics import DiceMetric, HausdorffDistanceMetric
+from monai.utils.enums import MetricReduction
+from monai.transforms import AsDiscrete, Activations, Compose, EnsureType
+from monai.networks.nets import DynUNet, SegResNet, UNETR
+from monai.data import decollate_batch
 
 
-class ConvertToMultiChanneld(MapTransform):
-    def __call__(self, data):
-        d = dict(data)
-        for key in self.keys:
-            result = []
-            # merge label 2 and label 3 to construct TC
-            result.append(d[key] == 1)
-            result.append(d[key] == 2)
-            result.append(d[key] == 3)
-            result = np.concatenate(result, axis=0).astype(np.float32)
-            d[key] = result
-        return d
+def get_args_parser():
+    parser = argparse.ArgumentParser(
+        'Train model 2.5D', add_help=False)
+
+    # * Model
+    # dataset parameters
+    parser.add_argument('--data_dir', default='/dataset/dataset0/',
+                        type=str, help='dataset directory')
+    parser.add_argument('--fold', default=0, type=int)
+
+    # Settings
+    parser.add_argument('--model_name', default='unetr',
+                        type=str, help='model name')
+    parser.add_argument('--pos_embed', default='perceptron',
+                        type=str, help='type of position embedding')
+    parser.add_argument('--norm_name', default='instance',
+                        type=str, help='normalization layer type in decoder')
+    parser.add_argument('--num_heads', default=12, type=int,
+                        help='number of attention heads in ViT encoder')
+    parser.add_argument('--mlp_dim', default=3072, type=int,
+                        help='mlp dimention in ViT encoder')
+    parser.add_argument('--hidden_size', default=768, type=int,
+                        help='hidden size dimention in ViT encoder')
+    parser.add_argument('--feature_size', default=16, type=int,
+                        help='feature size dimention')
+    parser.add_argument('--in_channels', default=1, type=int,
+                        help='number of input channels')
+    parser.add_argument('--out_channels', default=4, type=int,
+                        help='number of output channels')
+    parser.add_argument('--res_block', action='store_true',
+                        help='use residual blocks')
+    parser.add_argument('--conv_block', action='store_true',
+                        help='use conv blocks')
+    parser.add_argument('--use_normal_dataset',
+                        action='store_true', help='use monai Dataset class')
+    parser.add_argument('--a_min', default=0, type=float,
+                        help='a_min in ScaleIntensityRanged')
+    parser.add_argument('--a_max', default=750.0, type=float,
+                        help='a_max in ScaleIntensityRanged')
+    parser.add_argument('--b_min', default=0.0, type=float,
+                        help='b_min in ScaleIntensityRanged')
+    parser.add_argument('--b_max', default=1.0, type=float,
+                        help='b_max in ScaleIntensityRanged')
+    parser.add_argument('--space_x', default=1.5, type=float,
+                        help='spacing in x direction')
+    parser.add_argument('--space_y', default=1.5, type=float,
+                        help='spacing in y direction')
+    parser.add_argument('--space_z', default=1.5, type=float,
+                        help='spacing in z direction')
+    parser.add_argument('--roi_x', default=96, type=int,
+                        help='roi size in x direction')
+    parser.add_argument('--roi_y', default=96, type=int,
+                        help='roi size in y direction')
+    parser.add_argument('--roi_z', default=96, type=int,
+                        help='roi size in z direction')
+    parser.add_argument('--dropout_rate', default=0.0,
+                        type=float, help='dropout rate')
+    parser.add_argument('--RandFlipd_prob', default=0.2,
+                        type=float, help='RandFlipd aug probability')
+    parser.add_argument('--RandRotate90d_prob', default=0.2,
+                        type=float, help='RandRotate90d aug probability')
+    parser.add_argument('--RandScaleIntensityd_prob', default=0.1,
+                        type=float, help='RandScaleIntensityd aug probability')
+    parser.add_argument('--RandShiftIntensityd_prob', default=0.1,
+                        type=float, help='RandShiftIntensityd aug probability')
+    parser.add_argument('--infer_overlap', default=0.5, type=float,
+                        help='sliding window inference overlap')
+    parser.add_argument('--resume_ckpt', action='store_true',
+                        help='resume training from pretrained checkpoint')
+    parser.add_argument('--resume_jit', action='store_true',
+                        help='resume training from pretrained torchscript checkpoint')
+    parser.add_argument('--smooth_dr', default=1e-6, type=float,
+                        help='constant added to dice denominator to avoid nan')
+    parser.add_argument('--smooth_nr', default=0.0, type=float,
+                        help='constant added to dice numerator to avoid zero')
+
+    # Training/Optimization parameters
+    parser.add_argument('--use_fp16', type=utils.bool_flag, default=True, help="""Whether or not
+        to use half precision for training. Improves training time and memory requirements,
+        but can provoke instability and slight decay of performance. We recommend disabling
+        mixed precision if the loss is unstable, if reducing the patch size or if training with bigger ViTs.""")
+    parser.add_argument('--weight_decay', type=float, default=1e-4, help="""Initial value of the
+        weight decay.""")
+    parser.add_argument('--batch_size_per_gpu', default=128, type=int,
+                        help='Per-GPU batch-size : number of distinct images loaded on one GPU.')
+    parser.add_argument('--epochs', default=20, type=int,
+                        help='Number of epochs of training.')
+    parser.add_argument("--lr", default=1e-3, type=float, help="""Learning rate at the end of
+        linear warmup (highest LR used during training). The learning rate is linearly scaled
+        with the batch size, and specified here for a reference batch size of 256.""")
+
+    # Misc
+    parser.add_argument('--output_dir', default=".", type=str,
+                        help='Path to save logs and checkpoints.')
+    parser.add_argument('--saveckp_freq', default=5, type=int,
+                        help='Save checkpoint every x epochs.')
+    parser.add_argument('--seed', default=216, type=int, help='Random seed.')
+    parser.add_argument('--num_workers', default=4, type=int,
+                        help='Number of data loading workers per GPU.')
+    parser.add_argument("--dist_url", default="env://", type=str, help="""url used to set up
+        distributed training; see https://pytorch.org/docs/stable/distributed.html""")
+    parser.add_argument("--local_rank", default=0, type=int,
+                        help="Please ignore and do not set this argument.")
+    parser.add_argument('--pred', type=utils.bool_flag, default=False)
+    parser.add_argument('--resume', type=utils.bool_flag, default=False)
+    parser.add_argument('--test_mode', type=utils.bool_flag, default=False)
+    return parser
 
 
-class DebugTransform(MapTransform):
-    def __call__(self, data):
-        d = dict(data)
-        for key in self.keys:
-            print(d[key].shape)
-            # result = []
-            # # merge label 2 and label 3 to construct TC
-            # result.append(d[key] == 1)
-            # result.append(d[key] == 2)
-            # result.append(d[key] == 3)
-            # result = np.concatenate(result, axis=0).astype(np.float32)
-            # d[key] = result
-        return d
+def get_model(args):
+    # pretrained_dir = args.pretrained_dir
+    if (args.model_name is None) or args.model_name == 'unetr':
+        model = UNETR(
+            in_channels=args.in_channels,
+            out_channels=args.out_channels,
+            img_size=(args.roi_x, args.roi_y, args.roi_z),
+            feature_size=args.feature_size,
+            hidden_size=args.hidden_size,
+            mlp_dim=args.mlp_dim,
+            num_heads=args.num_heads,
+            pos_embed=args.pos_embed,
+            norm_name=args.norm_name,
+            conv_block=True,
+            res_block=True,
+            dropout_rate=args.dropout_rate)
+
+    elif args.model_name == 'dynunet':
+        def get_kernels_strides(args):
+            """
+            This function is only used for decathlon datasets with the provided patch sizes.
+            When refering this method for other tasks, please ensure that the patch size for each spatial dimension should
+            be divisible by the product of all strides in the corresponding dimension.
+            In addition, the minimal spatial size should have at least one dimension that has twice the size of
+            the product of all strides. For patch sizes that cannot find suitable strides, an error will be raised.
+            """
+            sizes, spacings = [args.roi_x, args.roi_y,
+                               args.roi_z], [args.space_x, args.space_y, args.space_z]
+            input_size = sizes
+            strides, kernels = [], []
+            while True:
+                spacing_ratio = [sp / min(spacings) for sp in spacings]
+                stride = [
+                    2 if ratio <= 2 and size >= 8 else 1
+                    for (ratio, size) in zip(spacing_ratio, sizes)
+                ]
+                kernel = [3 if ratio <= 2 else 1 for ratio in spacing_ratio]
+                if all(s == 1 for s in stride):
+                    break
+                for idx, (i, j) in enumerate(zip(sizes, stride)):
+                    if i % j != 0:
+                        raise ValueError(
+                            f"Patch size is not supported, please try to modify the size {input_size[idx]} in the spatial dimension {idx}."
+                        )
+                sizes = [i / j for i, j in zip(sizes, stride)]
+                spacings = [i * j for i, j in zip(spacings, stride)]
+                kernels.append(kernel)
+                strides.append(stride)
+
+            strides.insert(0, len(spacings) * [1])
+            kernels.append(len(spacings) * [3])
+            return kernels, strides
+
+        kernels, strides = get_kernels_strides(args)
+        model = DynUNet(
+            spatial_dims=3,
+            in_channels=args.in_channels,
+            out_channels=args.out_channels,
+            kernel_size=kernels,
+            strides=strides,
+            upsample_kernel_size=strides[1:],
+            norm_name=args.norm_name,
+            deep_supervision=False
+            # deep_supr_num=1
+        )
+
+    elif args.model_name == 'segresnet':
+        model = SegResNet(
+            blocks_down=[1, 2, 2, 4],
+            blocks_up=[1, 1, 1],
+            init_filters=16,
+            in_channels=args.in_channels,
+            out_channels=args.out_channels,
+            dropout_prob=0.2,
+        )
+    else:
+        raise ValueError('Unsupported model ' + str(args.model_name))
+
+    # if args.resume_ckpt:
+    #     model_dict = torch.load(os.path.join(
+    #         pretrained_dir, args.pretrained_model_name))
+    #     model.load_state_dict(model_dict)
+    #     print('Use pretrained weights')
+
+    # if args.resume_jit:
+    #     if not args.noamp:
+    #         print(
+    #             'Training from pre-trained checkpoint does not support AMP\nAMP is disabled.')
+    #         args.amp = args.noamp
+    #     model = torch.jit.load(os.path.join(
+    #         pretrained_dir, args.pretrained_model_name))
+
+    # move networks to gpu
+    model = model.cuda()
+    # synchronize batch norms (if any)
+    if args.norm_name == 'batch' and utils.has_batchnorms(model):
+        model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
+
+    model = nn.parallel.DistributedDataParallel(
+        model, device_ids=[args.gpu], find_unused_parameters=True)
+
+    return model
 
 
-def main(tempdir):
-    monai.config.print_config()
-    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+def train(args):
+    utils.init_distributed_mode(args)
+    utils.fix_random_seeds(args.seed)
+    # lr = (args.lr / 64) * torch.distributed.get_world_size() * \
+    #     args.batch_size_per_gpu
 
-    # failed = ['case7_day0', 'case81_day30', 'case85_day27']
+    # args.lr = lr
+    print("git:\n  {}\n".format(utils.get_sha()))
+    print("\n".join("%s: %s" % (k, str(v))
+          for k, v in sorted(dict(vars(args)).items())))
+    cudnn.benchmark = True
 
-    # def is_failed(path):
-    #     for f in failed:
-    #         if f in path:
-    #             return True
+    # ============ preparing data ... ============
+    train_loader, valid_loader = get_loader(args)
+    # ============ building Clusformer ... ============
+    model = get_model(args)
 
-    #     return False
+    # ============ preparing loss ... ============
+    criterion = DiceFocalLoss(to_onehot_y=False,
+                              sigmoid=True,
+                              squared_pred=False,
+                              smooth_nr=args.smooth_nr,
+                              smooth_dr=args.smooth_dr)
 
-    train_fold = 0
+    # ============ preparing optimizer ... ============
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr,
+                                  weight_decay=args.weight_decay)
 
-    images = sorted(glob(os.path.join(tempdir, "train/*/*.nii.gz")))
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=len(train_loader) * args.epochs, eta_min=0)
+    # for mixed precision training
+    fp16_scaler = None
+    if args.use_fp16:
+        fp16_scaler = torch.cuda.amp.GradScaler()
 
-    all_cases = [image.split("_")[-2] for image in images]
-    unique_cases = np.unique(all_cases)
-    kf = KFold(n_splits=5, random_state=2411, shuffle=True)
-    for fold, (train_idx, valid_idx) in enumerate(kf.split(unique_cases)):
-        if fold == train_fold:
-            train_cases = unique_cases[train_idx]
-            valid_cases = unique_cases[valid_idx]
+    print(f"Loss, optimizer and schedulers ready.")
 
-    train_images = [image for image in images if image.split(
-        "/")[-2] in train_cases]
-    train_segs = [image.replace('train', 'mask') for image in train_images]
+    # ============ optionally resume training ... ============
+    to_restore = {"epoch": 0}
+    best_score = -np.inf
+    is_save_best = False
+    if args.resume:
+        utils.restart_from_checkpoint(
+            os.path.join(args.output_dir, "checkpoint.pth"),
+            run_variables=to_restore,
+            model=model,
+            optimizer=optimizer,
+            fp16_scaler=fp16_scaler,
+            scheduler=scheduler,
+            best_score=best_score
+        )
 
-    val_images = [image for image in images if image.split(
-        "/")[-2] in valid_cases]
-    val_segs = [image.replace('train', 'mask') for image in val_images]
+    start_epoch = to_restore["epoch"]
 
-    train_files = [{"img": img, "seg": seg}
-                   for img, seg in zip(train_images, train_segs)]
-    val_files = [{"img": img, "seg": seg}
-                 for img, seg in zip(val_images, val_segs)]
+    start_time = time.time()
+    print("Starting eyestate training !")
+    for epoch in range(start_epoch, args.epochs):
+        train_loader.sampler.set_epoch(epoch)
 
-    roi_size = [80, 80, 80]
+        # ============ training one epoch ... ============
+        train_stats = train_one_epoch(model, criterion,
+                                      train_loader, optimizer, scheduler, epoch, fp16_scaler, True, args)
 
-    # define transforms for image and segmentation
-    train_transforms = Compose(
-        [
-            LoadImaged(keys=["img", "seg"]),
-            # DebugTransform(keys=['img', 'seg']),
-            AddChanneld(keys=['img', 'seg']),
-            # Orientationd(keys=["img", "seg"], axcodes="RAS"),
-            # Spacingd(
-            #     keys=["img", "seg"],
-            #     pixdim=(1.0, 1.0, 1.0),
-            #     mode=("bilinear", "nearest"),
-            # ),
+        # Distributed bn
+        timm.utils.distribute_bn(
+            model, torch.distributed.get_world_size(), True)
 
-            # ScaleIntensityd(keys="img"),
-            RandCropByPosNegLabeld(
-                keys=["img", "seg"], label_key="seg", spatial_size=roi_size, pos=1, neg=1, num_samples=4
-            ),
-            # RandSpatialCropd(keys=["img", "seg"],
-            #                  roi_size=roi_size, random_size=False),
-            NormalizeIntensityd(keys=["img"], nonzero=True, channel_wise=True),
-            ResizeWithPadOrCropd(keys=['img', 'seg'], spatial_size=roi_size),
-            # Resized(keys=['img', 'seg'], spatial_size=[
-            #         64, 64, 64], mode=('area', 'nearest')),
-            RandRotate90d(keys=["img", "seg"], prob=0.5, spatial_axes=[0, 2]),
-            ConvertToMultiChanneld(keys=['seg']),
-            EnsureTyped(keys=["img", "seg"]),
-        ]
-    )
-    val_transforms = Compose(
-        [
-            LoadImaged(keys=["img", "seg"]),
-            AddChanneld(keys=['img', 'seg']),
-            # Orientationd(keys=["img", "seg"], axcodes="RAS"),
-            # Spacingd(
-            #     keys=["img", "seg"],
-            #     pixdim=(1.0, 1.0, 1.0),
-            #     mode=("bilinear", "nearest"),
-            # ),
-            # AsChannelFirstd(keys=["img", "seg"], channel_dim=-1),
-            # ScaleIntensityd(keys="img"),
-            NormalizeIntensityd(
-                keys=["img"], nonzero=True, channel_wise=True),
-            ConvertToMultiChanneld(keys=['seg']),
-            EnsureTyped(keys=["img", "seg"]),
-        ]
-    )
+        save_dict = {
+            'state_dict': model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'scheduler': scheduler.state_dict(),
+            'epoch': epoch + 1,
+            'args': args,
+            'criterion': criterion.state_dict(),
+        }
 
-    # define dataset, data loader
-    # check_ds = monai.data.Dataset(data=train_files, transform=train_transforms)
-    # # use batch_size=2 to load images and use RandCropByPosNegLabeld to generate 2 x 4 images for network training
-    # check_loader = DataLoader(check_ds, batch_size=2,
-    #                           num_workers=4, collate_fn=list_data_collate)
-    # check_data = monai.utils.misc.first(check_loader)
-    # print(check_data["img"].shape, check_data["seg"].shape)
+        if epoch % 5 == 0:
+            # ============ validate one epoch ... ============
+            valid_stats = valid_one_epoch(
+                model, valid_loader, epoch, fp16_scaler, args)
 
-    # create a training data loader
-    train_ds = monai.data.Dataset(data=train_files, transform=train_transforms)
-    # use batch_size=2 to load images and use RandCropByPosNegLabeld to generate 2 x 4 images for network training
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=4,
-        shuffle=True,
-        num_workers=4,
-        collate_fn=list_data_collate,
-        pin_memory=torch.cuda.is_available(),
-    )
-    # create a validation data loader
-    val_ds = monai.data.Dataset(data=val_files, transform=val_transforms)
-    val_loader = DataLoader(val_ds, batch_size=1,
-                            num_workers=4, collate_fn=list_data_collate)
-    dice_metric = DiceMetric(include_background=True,
-                             reduction="mean", get_not_nans=False)
-    post_trans = Compose([EnsureType(), Activations(
-        sigmoid=True), AsDiscrete(threshold=0.5)])
-    # create UNet, DiceLoss and Adam optimizer
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # model = monai.networks.nets.UNet(
-    #     spatial_dims=3,
-    #     in_channels=1,
-    #     out_channels=3,
-    #     channels=(16, 32, 64, 128, 256),
-    #     strides=(2, 2, 2, 2),
-    #     num_res_units=2,
-    # ).to(device)
+            current_score = valid_stats['dice']
+            if current_score > best_score:
+                best_score = current_score
+                is_save_best = True
+            else:
+                is_save_best = False
 
-    # model = monai.networks.nets.SegResNet(
-    #     blocks_down=[1, 2, 2, 4],
-    #     blocks_up=[1, 1, 1],
-    #     init_filters=16,
-    #     in_channels=1,
-    #     out_channels=3,
-    #     dropout_prob=0.2,
-    # ).to(device)
+            valid_stats['best_score'] = best_score
 
-    model = monai.networks.nets.UNETR(
-        in_channels=1, out_channels=3, img_size=roi_size,
-        feature_size=32
-    ).to(device)
-    loss_function = monai.losses.DiceLoss(
-        smooth_nr=0, smooth_dr=1e-5, squared_pred=True, to_onehot_y=False, sigmoid=True)
-    optimizer = torch.optim.Adam(model.parameters(), 1e-3)
+            # ============ writing logs ... ============
+            if fp16_scaler is not None:
+                save_dict['fp16_scaler'] = fp16_scaler.state_dict()
+            utils.save_on_master(save_dict, os.path.join(
+                args.output_dir, 'checkpoint.pth'))
+            if is_save_best:
+                utils.save_on_master(save_dict, os.path.join(
+                    args.output_dir, 'best.pth'))
 
-    num_epochs = 300
-    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=num_epochs * len(train_loader))
+            log_valid_stats = {**{f'valid_{k}': v for k, v in valid_stats.items()},
+                               'epoch': epoch}
 
-    # start a typical PyTorch training
-    val_interval = 1
-    best_metric = -1
-    best_metric_epoch = -1
-    epoch_loss_values = list()
-    metric_values = list()
-    writer = SummaryWriter()
-    for epoch in range(num_epochs):
-        print("-" * 10)
-        print(f"epoch {epoch + 1}/{num_epochs}")
-        model.train()
-        epoch_loss = 0
-        step = 0
-        for batch_data in train_loader:
-            step += 1
-            inputs, labels = batch_data["img"].to(
-                device), batch_data["seg"].to(device)
+            if utils.is_main_process():
+                with (Path(args.output_dir) / "log.txt").open("a") as f:
+                    f.write(json.dumps(log_valid_stats) + "\n")
+
+        if args.saveckp_freq and epoch % args.saveckp_freq == 0:
+            utils.save_on_master(save_dict, os.path.join(
+                args.output_dir, f'checkpoint{epoch:04}.pth'))
+        log_train_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
+                           'epoch': epoch}
+
+        if utils.is_main_process():
+            with (Path(args.output_dir) / "log.txt").open("a") as f:
+                f.write(json.dumps(log_train_stats) + "\n")
+
+    total_time = time.time() - start_time
+    total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+    print('Training time {}'.format(total_time_str))
+
+
+def train_one_epoch(model, criterion, data_loader, optimizer, scheduler, epoch, fp16_scaler, is_train, args):
+    model.train()
+    prefix = "TRAIN"
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    header = 'Epoch: [{}/{}]'.format(epoch, args.epochs)
+    for batch in metric_logger.log_every(data_loader, 50, header):
+        # move images to gpu
+        images = batch['image'].cuda(non_blocking=True)
+        targets = batch['label'].cuda(non_blocking=True)
+
+        with torch.cuda.amp.autocast(fp16_scaler is not None):
+            if not is_train:
+                with torch.no_grad():
+                    logits = model(images)
+            else:
+                logits = model(images)
+            loss = criterion(logits, targets)
+            # metric_dict = metric_fn(logits, targets)
+
+        if not math.isfinite(loss.item()):
+            print("Loss is {}, stopping training".format(loss.item()), force=True)
+            sys.exit(1)
+
+        if is_train:
+            # student update
             optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = loss_function(outputs, labels)
-            loss.backward()
-            optimizer.step()
-            epoch_loss += loss.item()
-            epoch_len = len(train_ds) // train_loader.batch_size
-            lr_scheduler.step()
-            current_lr = optimizer.param_groups[0]["lr"]
-            print(
-                f"{step}/{epoch_len}, train_loss: {loss.item():.4f}, lr: {current_lr:.4f}")
-            writer.add_scalar("train_loss", loss.item(),
-                              epoch_len * epoch + step)
-        epoch_loss /= step
-        epoch_loss_values.append(epoch_loss)
-        print(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
+            param_norms = None
+            if fp16_scaler is None:
+                loss.backward()
+                optimizer.step()
+            else:
+                fp16_scaler.scale(loss).backward()
+                fp16_scaler.step(optimizer)
+                fp16_scaler.update()
 
-        if (epoch + 1) % val_interval == 0:
-            model.eval()
+            scheduler.step()
+
+        # logging
+        torch.cuda.synchronize()
+        metric_logger.update(loss=loss.item())
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
+    # gather the stats from all processes
+    metric_logger.synchronize_between_processes()
+    print(f"[{prefix}] Averaged stats:", metric_logger)
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+
+def valid_one_epoch(model, data_loader, epoch, fp16_scaler, args):
+    inf_size = [args.roi_x, args.roi_y, args.roi_z]
+    model.eval()
+
+    # Functions for post evaluation
+
+    # post_label = AsDiscrete(to_onehot=True,
+    #                         n_classes=args.out_channels)
+
+    # post_pred = AsDiscrete(argmax=True,
+    #                        to_onehot=True,
+    #                        n_classes=args.out_channels)
+
+    def post_label(x):
+        return x
+
+    post_pred = Compose(
+        [EnsureType(), Activations(sigmoid=True), AsDiscrete(threshold=0.5)]
+    )
+
+    metric_fn = DiceMetric(include_background=True,
+                           reduction=MetricReduction.MEAN,
+                           get_not_nans=True)
+
+    model_inferer = partial(sliding_window_inference,
+                            roi_size=inf_size,
+                            sw_batch_size=1,
+                            predictor=model,
+                            overlap=args.infer_overlap)
+
+    prefix = 'VALID'
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    header = 'Epoch: [{}/{}]'.format(epoch, args.epochs)
+    for batch in metric_logger.log_every(data_loader, 1, header):
+
+        # move images to gpu
+        images = batch['image'].cuda(non_blocking=True)
+        targets = batch['label'].cuda(non_blocking=True)
+
+        with torch.cuda.amp.autocast(fp16_scaler is not None):
             with torch.no_grad():
-                val_images = None
-                val_labels = None
-                val_outputs = None
-                for val_data in val_loader:
-                    val_images, val_labels = val_data["img"].to(
-                        device), val_data["seg"].to(device)
-                    # roi_size = (64, 112, 112)
-                    sw_batch_size = 4
-                    val_outputs = sliding_window_inference(
-                        val_images, roi_size, sw_batch_size, model)
-                    # import pdb
-                    # pdb.set_trace()
-                    val_outputs = [post_trans(i)
-                                   for i in decollate_batch(val_outputs)]
-                    # compute metric for current iteration
-                    dice_metric(y_pred=val_outputs, y=val_labels)
-                # aggregate the final mean dice result
-                metric = dice_metric.aggregate().item()
-                # reset the status for next validation round
-                dice_metric.reset()
+                logits = model_inferer(images)
 
-                metric_values.append(metric)
-                if metric > best_metric:
-                    best_metric = metric
-                    best_metric_epoch = epoch + 1
-                    torch.save(model.state_dict(),
-                               "best_metric_model_segmentation3d_dict.pth")
-                    print("saved new best metric model")
-                print(
-                    "current epoch: {} current mean dice: {:.4f} best mean dice: {:.4f} at epoch {}".format(
-                        epoch + 1, metric, best_metric, best_metric_epoch
-                    )
-                )
-                writer.add_scalar("val_mean_dice", metric, epoch + 1)
-                # plot the last model output as GIF image in TensorBoard with the corresponding image and label
-                plot_2d_or_3d_image(val_images, epoch + 1,
-                                    writer, index=0, tag="image")
-                plot_2d_or_3d_image(val_labels, epoch + 1,
-                                    writer, index=0, tag="label")
-                plot_2d_or_3d_image(val_outputs, epoch + 1,
-                                    writer, index=0, tag="output")
+            val_labels_list = decollate_batch(targets)
+            val_labels_convert = [post_label(
+                val_label_tensor) for val_label_tensor in val_labels_list]
+            val_outputs_list = decollate_batch(logits)
+            val_output_convert = [post_pred(val_pred_tensor)
+                                  for val_pred_tensor in val_outputs_list]
+            acc = metric_fn(y_pred=val_output_convert, y=val_labels_convert)
+            acc = acc.mean()
 
-    print(
-        f"train completed, best_metric: {best_metric:.4f} at epoch: {best_metric_epoch}")
-    writer.close()
+        # logging
+        torch.cuda.synchronize()
+        metric_logger.update(dice=acc.item())
+    # gather the stats from all processes
+    metric_logger.synchronize_between_processes()
+    print(f"[{prefix}] Averaged stats:", metric_logger)
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-if __name__ == "__main__":
-    main(tempdir='data/nii-data/')
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser('Train 3D', parents=[get_args_parser()])
+    args = parser.parse_args()
+    Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    train(args)

@@ -4,6 +4,9 @@ __pycache__/
 *$py.class
 data/
 logs/
+notebooks/
+*events.out*
+*.pth
 
 # C extensions
 *.so

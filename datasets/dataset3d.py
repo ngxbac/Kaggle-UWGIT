@@ -155,8 +155,11 @@ def get_loader(args):
             transforms.Orientationd(keys=["image", "label"],
                                     axcodes="RAS"),
 
-            transforms.NormalizeIntensityd(
-                keys=["image"], nonzero=True, channel_wise=True),
+            transforms.ScaleIntensityRanged(
+                keys=["image"], a_min=0, a_max=16384, b_min=0.0, b_max=1.0, clip=True),
+
+            # transforms.NormalizeIntensityd(
+            #     keys=["image"], nonzero=True, channel_wise=True),
             transforms.CropForegroundd(
                 keys=["image", "label"], source_key="image"),
 
@@ -166,9 +169,9 @@ def get_loader(args):
                 spatial_size=(args.roi_x, args.roi_y, args.roi_z),
                 pos=1,
                 neg=1,
-                num_samples=4,
+                num_samples=args.num_samples,
                 image_key="image",
-                image_threshold=0,
+                # image_threshold=0,
             ),
 
             transforms.RandFlipd(keys=["image", "label"],
@@ -203,8 +206,11 @@ def get_loader(args):
             transforms.Orientationd(keys=["image", "label"],
                                     axcodes="RAS"),
 
-            transforms.NormalizeIntensityd(
-                keys=["image"], nonzero=True, channel_wise=True),
+            transforms.ScaleIntensityRanged(
+                keys=["image"], a_min=0, a_max=16384, b_min=0.0, b_max=1.0, clip=True),
+
+            # transforms.NormalizeIntensityd(
+            #     keys=["image"], nonzero=True, channel_wise=True),
             transforms.CropForegroundd(
                 keys=["image", "label"], source_key="image"),
             transforms.ToTensord(keys=["image", "label"]),

@@ -116,6 +116,8 @@ def get_args_parser():
                         help='constant added to dice denominator to avoid nan')
     parser.add_argument('--smooth_nr', default=0.0, type=float,
                         help='constant added to dice numerator to avoid zero')
+    parser.add_argument('--num_samples', default=32, type=int,
+                        help='Number of samples')
 
     # Training/Optimization parameters
     parser.add_argument('--use_fp16', type=utils.bool_flag, default=True, help="""Whether or not

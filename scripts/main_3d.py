@@ -37,7 +37,7 @@ from monai.losses import DiceLoss, DiceCELoss, DiceFocalLoss
 from monai.metrics import DiceMetric, HausdorffDistanceMetric
 from monai.utils.enums import MetricReduction
 from monai.transforms import AsDiscrete, Activations, Compose, EnsureType
-from monai.networks.nets import DynUNet, SegResNet, UNETR
+from monai.networks.nets import DynUNet, SegResNet, UNETR, BasicUNet
 from monai.data import decollate_batch
 
 
@@ -226,6 +226,11 @@ def get_model(args):
             in_channels=args.in_channels,
             out_channels=args.out_channels,
             dropout_prob=0.2,
+        )
+    elif args.model_name == 'basicunet':
+        model = BasicUNet(
+            in_channels=args.in_channels,
+            out_channels=args.out_channels
         )
     else:
         raise ValueError('Unsupported model ' + str(args.model_name))

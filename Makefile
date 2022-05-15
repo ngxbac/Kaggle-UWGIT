@@ -25,8 +25,8 @@ roi_size=80
 batch_size_3d=1
 epochs_3d=300
 space=1.5
-model=segresnet
-num_samples=32
+model=basicunet
+num_samples=8
 logdir=logs/3d/pilot/${model}_${roi_size}_${space}_${fold}_scale_intensity_${num_samples}samples_${epochs_3d}ep
 
 train_3d:

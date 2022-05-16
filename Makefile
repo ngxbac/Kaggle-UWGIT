@@ -25,9 +25,9 @@ roi_size=80
 batch_size_3d=1
 epochs_3d=300
 space=1.5
-model=segresnet
-num_samples=8
-logdir=logs/3d/multiclass/${model}_${roi_size}_${space}_${fold}_scale_intensity_${num_samples}samples_${epochs_3d}ep
+model=dynunet
+num_samples=4
+logdir=logs/3d/multiclass/${model}_${roi_size}_${space}_${fold}_scale_intensity_${num_samples}samples_simpleaug_${epochs_3d}ep_resblock
 
 train_3d:
 	NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE} PYTHONPATH=. \
@@ -49,4 +49,5 @@ train_3d:
 	--output_dir ${logdir} \
 	--batch_size_per_gpu ${batch_size_3d} \
 	--epochs ${epochs_3d} \
+	--res_block \
 	--use_fp16 False	

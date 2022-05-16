@@ -174,26 +174,26 @@ def get_loader(args):
                 image_key="image",
             ),
 
-            transforms.RandFlipd(keys=["image", "label"],
-                                 prob=args.RandFlipd_prob,
-                                 spatial_axis=0),
-            transforms.RandFlipd(keys=["image", "label"],
-                                 prob=args.RandFlipd_prob,
-                                 spatial_axis=1),
-            transforms.RandFlipd(keys=["image", "label"],
-                                 prob=args.RandFlipd_prob,
-                                 spatial_axis=2),
-            transforms.RandRotate90d(
-                keys=["image", "label"],
-                prob=args.RandRotate90d_prob,
-                max_k=3,
-            ),
-            transforms.RandScaleIntensityd(keys="image",
-                                           factors=0.1,
-                                           prob=args.RandScaleIntensityd_prob),
-            transforms.RandShiftIntensityd(keys="image",
-                                           offsets=0.1,
-                                           prob=args.RandShiftIntensityd_prob)
+            # transforms.RandFlipd(keys=["image", "label"],
+            #                      prob=args.RandFlipd_prob,
+            #                      spatial_axis=0),
+            # transforms.RandFlipd(keys=["image", "label"],
+            #                      prob=args.RandFlipd_prob,
+            #                      spatial_axis=1),
+            # transforms.RandFlipd(keys=["image", "label"],
+            #                      prob=args.RandFlipd_prob,
+            #                      spatial_axis=2),
+            # transforms.RandRotate90d(
+            #     keys=["image", "label"],
+            #     prob=args.RandRotate90d_prob,
+            #     max_k=3,
+            # ),
+            # transforms.RandScaleIntensityd(keys="image",
+            #                                factors=0.1,
+            #                                prob=args.RandScaleIntensityd_prob),
+            # transforms.RandShiftIntensityd(keys="image",
+            #                                offsets=0.1,
+            #                                prob=args.RandShiftIntensityd_prob)
     ]
 
     train_transforms = base_transforms + advanced_transforms

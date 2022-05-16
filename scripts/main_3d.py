@@ -37,8 +37,10 @@ from monai.losses import DiceLoss, DiceCELoss, DiceFocalLoss
 from monai.metrics import DiceMetric, HausdorffDistanceMetric
 from monai.utils.enums import MetricReduction
 from monai.transforms import AsDiscrete, Activations, Compose, EnsureType
-from monai.networks.nets import DynUNet, SegResNet, UNETR
+from monai.networks.nets import DynUNet, SegResNet, UNETR, VNet
 from monai.data import decollate_batch
+
+# from models.swin_unetr import SwinUNETR
 
 
 def get_args_parser():
@@ -216,6 +218,7 @@ def get_model(args):
             strides=strides,
             upsample_kernel_size=strides[1:],
             norm_name=args.norm_name,
+            res_block=args.res_block,
             deep_supervision=False
             # deep_supr_num=1
         )
@@ -228,6 +231,17 @@ def get_model(args):
             in_channels=args.in_channels,
             out_channels=args.out_channels,
             dropout_prob=0.2,
+        )
+    elif args.model_name == 'swinunet':
+        model = SwinUNETR(
+            img_size=(args.roi_x, args.roi_y, args.roi_z),
+            in_channels=args.in_channels,
+            out_channels=args.out_channels,
+        )
+    elif args.model_name == 'vnet':
+        model = VNet(
+            in_channels=args.in_channels,
+            out_channels=args.out_channels,
         )
     else:
         raise ValueError('Unsupported model ' + str(args.model_name))
@@ -263,6 +277,9 @@ def train(args):
         args.out_channels = 3
     else:
         args.out_channels = 4
+
+    # if not args.multilabel:
+    #     args.lr = args.lr / 10
 
     utils.init_distributed_mode(args)
     utils.fix_random_seeds(args.seed)

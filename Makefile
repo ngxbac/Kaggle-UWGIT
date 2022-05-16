@@ -26,11 +26,11 @@ batch_size_3d=1
 epochs_3d=300
 space=1.5
 model=segresnet
-num_samples=32
-logdir=logs/3d/pilot/${model}_${roi_size}_${space}_${fold}_scale_intensity_${num_samples}samples_${epochs_3d}ep
+num_samples=8
+logdir=logs/3d/multiclass/${model}_${roi_size}_${space}_${fold}_scale_intensity_${num_samples}samples_${epochs_3d}ep
 
 train_3d:
-	CUDA_VISIBLE_DEVICES=4,5,6,7 NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE} PYTHONPATH=. \
+	NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE} PYTHONPATH=. \
 	python -u -m torch.distributed.launch --nproc_per_node=4 --master_port 2106 scripts/main_3d.py \
     --feature_size=32 \
     --batch_size=1 \

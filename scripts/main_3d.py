@@ -50,6 +50,8 @@ def get_args_parser():
     parser.add_argument('--data_dir', default='/dataset/dataset0/',
                         type=str, help='dataset directory')
     parser.add_argument('--fold', default=0, type=int)
+    parser.add_argument('--multilabel', action='store_true',
+                        help='')
 
     # Settings
     parser.add_argument('--model_name', default='unetr',
@@ -257,12 +259,13 @@ def get_model(args):
 
 
 def train(args):
+    if args.multilabel:
+        args.out_channels = 3
+    else:
+        args.out_channels = 4
+
     utils.init_distributed_mode(args)
     utils.fix_random_seeds(args.seed)
-    # lr = (args.lr / 64) * torch.distributed.get_world_size() * \
-    #     args.batch_size_per_gpu
-
-    # args.lr = lr
     print("git:\n  {}\n".format(utils.get_sha()))
     print("\n".join("%s: %s" % (k, str(v))
           for k, v in sorted(dict(vars(args)).items())))
@@ -274,11 +277,20 @@ def train(args):
     model = get_model(args)
 
     # ============ preparing loss ... ============
-    criterion = DiceFocalLoss(to_onehot_y=False,
-                              sigmoid=True,
-                              squared_pred=False,
-                              smooth_nr=args.smooth_nr,
-                              smooth_dr=args.smooth_dr)
+    if args.multilabel:
+        criterion = DiceFocalLoss(to_onehot_y=False,
+                                  sigmoid=True,
+                                  squared_pred=False,
+                                  smooth_nr=args.smooth_nr,
+                                  smooth_dr=args.smooth_dr)
+    else:
+        criterion = DiceCELoss(
+            to_onehot_y=True,
+            softmax=True,
+            squared_pred=True,
+            smooth_nr=args.smooth_nr,
+            smooth_dr=args.smooth_dr
+        )
 
     # ============ preparing optimizer ... ============
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr,
@@ -431,23 +443,25 @@ def valid_one_epoch(model, data_loader, epoch, fp16_scaler, args):
 
     # Functions for post evaluation
 
-    # post_label = AsDiscrete(to_onehot=True,
-    #                         n_classes=args.out_channels)
+    if args.multilabel:
+        def post_label(x):
+            return x
 
-    # post_pred = AsDiscrete(argmax=True,
-    #                        to_onehot=True,
-    #                        n_classes=args.out_channels)
+        post_pred = Compose(
+            [EnsureType(), Activations(sigmoid=True), AsDiscrete(threshold=0.5)]
+        )
 
-    def post_label(x):
-        return x
+    else:
 
-    post_pred = Compose(
-        [EnsureType(), Activations(sigmoid=True), AsDiscrete(threshold=0.5)]
-    )
+        post_label = AsDiscrete(to_onehot=True,
+                                n_classes=args.out_channels)
+        post_pred = AsDiscrete(argmax=True,
+                               to_onehot=True,
+                               n_classes=args.out_channels)
 
     metric_fn = DiceMetric(include_background=True,
-                           reduction=MetricReduction.MEAN,
-                           get_not_nans=True)
+                       reduction=MetricReduction.MEAN,
+                       get_not_nans=True)
 
     model_inferer = partial(sliding_window_inference,
                             roi_size=inf_size,

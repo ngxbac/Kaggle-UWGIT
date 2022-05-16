@@ -116,53 +116,54 @@ def get_loader(args):
     print(data_dir)
 
     train_fold = args.fold
-    # df = pd.read_csv('train_valid_case.csv')
-    # train_df = df[df['fold'] != train_fold]
-    # valid_df = df[df['fold'] == train_fold]
+    df = pd.read_csv('train_valid_case.csv')
+    train_df = df[df['fold'] != train_fold]
+    valid_df = df[df['fold'] == train_fold]
 
-    # train_cases = train_df['case'].unique()
-    # valid_cases = valid_df['case'].unique()
+    train_cases = train_df['case'].unique()
+    valid_cases = valid_df['case'].unique()
 
     images = sorted(glob(os.path.join(data_dir, "train/*/*.nii.gz")))
 
-    all_cases = [image.split("_")[-2] for image in images]
-    unique_cases = np.unique(all_cases)
-    kf = KFold(n_splits=5, random_state=2411, shuffle=True)
-    for fold, (train_idx, valid_idx) in enumerate(kf.split(unique_cases)):
-        if fold == train_fold:
-            train_cases = unique_cases[train_idx]
-            valid_cases = unique_cases[valid_idx]
+    # all_cases = [image.split("_")[-2] for image in images]
+    # unique_cases = np.unique(all_cases)
+    # kf = KFold(n_splits=5, random_state=2411, shuffle=True)
+    # for fold, (train_idx, valid_idx) in enumerate(kf.split(unique_cases)):
+    #     if fold == train_fold:
+    #         train_cases = unique_cases[train_idx]
+    #         valid_cases = unique_cases[valid_idx]
+
+    if args.multilabel:
+        mask_folder = 'mask-multi'
+    else:
+        mask_folder = 'mask'
 
     train_images = [image for image in images if image.split(
         "/")[-2] in train_cases]
-    train_segs = [image.replace('train', 'mask-multi')
+    train_segs = [image.replace('train', mask_folder)
                   for image in train_images]
 
     val_images = [image for image in images if image.split(
         "/")[-2] in valid_cases]
-    val_segs = [image.replace('train', 'mask-multi') for image in val_images]
+    val_segs = [image.replace('train', mask_folder) for image in val_images]
 
     train_files = [{"image": img, "label": seg}
                    for img, seg in zip(train_images, train_segs)]
     val_files = [{"image": img, "label": seg}
                  for img, seg in zip(val_images, val_segs)]
 
-    train_transform = transforms.Compose(
-        [
+    base_transforms = [
             transforms.LoadImaged(keys=["image", "label"]),
             transforms.AddChanneld(keys=["image", "label"]),
-            ConvertToMultiChannel(keys=['label']),
             transforms.Orientationd(keys=["image", "label"],
                                     axcodes="RAS"),
-
             transforms.ScaleIntensityRanged(
                 keys=["image"], a_min=0, a_max=16384, b_min=0.0, b_max=1.0, clip=True),
-
-            # transforms.NormalizeIntensityd(
-            #     keys=["image"], nonzero=True, channel_wise=True),
             transforms.CropForegroundd(
                 keys=["image", "label"], source_key="image"),
+    ]
 
+    advanced_transforms = [
             transforms.RandCropByPosNegLabeld(
                 keys=["image", "label"],
                 label_key="label",
@@ -171,7 +172,6 @@ def get_loader(args):
                 neg=1,
                 num_samples=args.num_samples,
                 image_key="image",
-                # image_threshold=0,
             ),
 
             transforms.RandFlipd(keys=["image", "label"],
@@ -193,32 +193,22 @@ def get_loader(args):
                                            prob=args.RandScaleIntensityd_prob),
             transforms.RandShiftIntensityd(keys="image",
                                            offsets=0.1,
-                                           prob=args.RandShiftIntensityd_prob),
+                                           prob=args.RandShiftIntensityd_prob)
+    ]
 
-            transforms.ToTensord(keys=["image", "label"]),
-        ]
-    )
-    val_transform = transforms.Compose(
-        [
-            transforms.LoadImaged(keys=["image", "label"]),
-            transforms.AddChanneld(keys=["image", "label"]),
-            ConvertToMultiChannel(keys=['label']),
-            transforms.Orientationd(keys=["image", "label"],
-                                    axcodes="RAS"),
+    train_transforms = base_transforms + advanced_transforms
 
-            transforms.ScaleIntensityRanged(
-                keys=["image"], a_min=0, a_max=16384, b_min=0.0, b_max=1.0, clip=True),
+    if args.multilabel:
+        train_transforms += [ConvertToMultiChannel(keys=['label'])]
 
-            # transforms.NormalizeIntensityd(
-            #     keys=["image"], nonzero=True, channel_wise=True),
-            transforms.CropForegroundd(
-                keys=["image", "label"], source_key="image"),
-            transforms.ToTensord(keys=["image", "label"]),
-        ]
-    )
+    train_transforms += [transforms.ToTensord(keys=["image", "label"])]
+    valid_transforms = base_transforms + [transforms.ToTensord(keys=["image", "label"])]
+
+    train_transforms = transforms.Compose(train_transforms)
+    valid_transforms = transforms.Compose(valid_transforms)
 
     if args.test_mode:
-        transform = val_transform
+        transform = val_transforms
         test_ds = data.Dataset(data=val_files, transform=transform)
         test_sampler = Sampler(
             test_ds, shuffle=False)
@@ -231,18 +221,14 @@ def get_loader(args):
                                       persistent_workers=True)
         loader = [test_loader, transform]
     else:
-        # datalist = load_decathlon_datalist(datalist_json,
-        #                                    True,
-        #                                    "training",
-        #                                    base_dir=data_dir)
         if args.use_normal_dataset:
             train_ds = data.Dataset(
-                data=train_files, transform=train_transform)
+                data=train_files, transform=train_transforms)
         else:
             train_ds = data.CacheDataset(
                 data=train_files,
-                transform=train_transform,
-                cache_num=24,
+                transform=train_transforms,
+                # cache_num=24,
                 cache_rate=1.0,
                 num_workers=args.num_workers,
             )
@@ -258,7 +244,7 @@ def get_loader(args):
         #                                     True,
         #                                     "validation",
         #                                     base_dir=data_dir)
-        val_ds = data.Dataset(data=val_files, transform=val_transform)
+        val_ds = data.Dataset(data=val_files, transform=valid_transforms)
         val_sampler = Sampler(
             val_ds, shuffle=False)
         val_loader = data.DataLoader(val_ds,

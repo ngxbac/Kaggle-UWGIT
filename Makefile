@@ -23,11 +23,11 @@ train:
 
 roi_size=80
 batch_size_3d=1
-epochs_3d=300
+epochs_3d=200
 space=1.5
-model=dynunet
+model=coplenet
 num_samples=4
-logdir=logs/3d/multiclass/${model}_${roi_size}_${space}_${fold}_scale_intensity_${num_samples}samples_simpleaug_${epochs_3d}ep_resblock
+logdir=logs/3d/multiclass/${model}_${roi_size}_${space}_${fold}_scale_intensity_${num_samples}samples_simpleaug_${epochs_3d}ep
 
 train_3d:
 	NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE} PYTHONPATH=. \

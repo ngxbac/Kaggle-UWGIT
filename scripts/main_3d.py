@@ -41,6 +41,7 @@ from monai.networks.nets import DynUNet, SegResNet, UNETR, VNet
 from monai.data import decollate_batch
 
 # from models.swin_unetr import SwinUNETR
+from models.coplenet import CopleNet
 
 
 def get_args_parser():
@@ -240,6 +241,12 @@ def get_model(args):
         )
     elif args.model_name == 'vnet':
         model = VNet(
+            in_channels=args.in_channels,
+            out_channels=args.out_channels,
+        )
+    elif args.model_name == 'coplenet':
+        model = CopleNet(
+            spatial_dims=2,
             in_channels=args.in_channels,
             out_channels=args.out_channels,
         )

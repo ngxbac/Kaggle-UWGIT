@@ -15,7 +15,7 @@ import numpy as np
 import torch
 import pandas as pd
 from monai import transforms, data
-from monai.data import load_decathlon_datalist
+# from monai.data import load_decathlon_datalist
 
 
 class Sampler(torch.utils.data.Sampler):

@@ -136,7 +136,7 @@ def get_loader(args):
     if args.multilabel:
         mask_folder = 'mask-multi'
     else:
-        mask_folder = 'mask'
+        mask_folder = 'mask-102'
 
     train_images = [image for image in images if image.split(
         "/")[-2] in train_cases]

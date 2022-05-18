@@ -152,7 +152,7 @@ def get_args_parser():
     parser.add_argument("--local_rank", default=0, type=int,
                         help="Please ignore and do not set this argument.")
     parser.add_argument('--pred', type=utils.bool_flag, default=False)
-    parser.add_argument('--resume', type=utils.bool_flag, default=False)
+    parser.add_argument('--resume', type=str, default='')
     parser.add_argument('--test_mode', type=utils.bool_flag, default=False)
     return parser
 
@@ -333,15 +333,16 @@ def train(args):
     to_restore = {"epoch": 0}
     best_score = -np.inf
     is_save_best = False
-    if args.resume:
+
+    if os.path.isfile(args.resume):
         utils.restart_from_checkpoint(
-            os.path.join(args.output_dir, "checkpoint.pth"),
-            run_variables=to_restore,
-            model=model,
-            optimizer=optimizer,
-            fp16_scaler=fp16_scaler,
-            scheduler=scheduler,
-            best_score=best_score
+            os.path.join(args.resume),
+            # run_variables=to_restore,
+            state_dict=model,
+            # optimizer=optimizer,
+            # fp16_scaler=fp16_scaler,
+            # scheduler=scheduler,
+            # best_score=best_score
         )
 
     start_epoch = to_restore["epoch"]

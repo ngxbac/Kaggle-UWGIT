@@ -27,7 +27,8 @@ epochs_3d=200
 space=1.5
 model=segresnet
 num_samples=4
-logdir=logs/3d/multiclass/${model}_${roi_size}_${fold}_${epochs_3d}ep_012
+resume=''
+logdir=logs/3d/finetune/${model}_${roi_size}_${fold}_${epochs_3d}ep_012
 
 train_3d:
 	NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE} PYTHONPATH=. \
@@ -36,7 +37,7 @@ train_3d:
     --batch_size=1 \
     --roi_x ${roi_size} \
     --roi_y ${roi_size} \
-    --roi_z 64 \
+    --roi_z 80 \
     --space_x ${space} \
     --space_y ${space} \
     --space_z ${space} \
@@ -50,7 +51,8 @@ train_3d:
 	--batch_size_per_gpu ${batch_size_3d} \
 	--epochs ${epochs_3d} \
 	--res_block \
-	--use_fp16 False	
+	--resume ${resume} \
+	--use_fp16 False
 
 
 

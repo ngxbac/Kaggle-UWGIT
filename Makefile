@@ -21,13 +21,13 @@ train:
 	--use_fp16 False
 
 
-roi_size=80
+roi_size=160
 batch_size_3d=1
 epochs_3d=200
 space=1.5
-model=coplenet
+model=segresnet
 num_samples=4
-logdir=logs/3d/multiclass/${model}_${roi_size}_${space}_${fold}_scale_intensity_${num_samples}samples_simpleaug_${epochs_3d}ep
+logdir=logs/3d/multiclass/${model}_${roi_size}_${fold}_${epochs_3d}ep_012
 
 train_3d:
 	NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE} PYTHONPATH=. \
@@ -36,7 +36,32 @@ train_3d:
     --batch_size=1 \
     --roi_x ${roi_size} \
     --roi_y ${roi_size} \
-    --roi_z 80 \
+    --roi_z 64 \
+    --space_x ${space} \
+    --space_y ${space} \
+    --space_z ${space} \
+    --model_name ${model} \
+    --fold ${fold} \
+    --out_channels 3 \
+	--num_samples ${num_samples} \
+    --infer_overlap=0.5 \
+    --data_dir=data/nii-data-2 \
+	--output_dir ${logdir} \
+	--batch_size_per_gpu ${batch_size_3d} \
+	--epochs ${epochs_3d} \
+	--res_block \
+	--use_fp16 False	
+
+
+
+train_3d_%:
+	NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE} PYTHONPATH=. \
+	python -u -m torch.distributed.launch --nproc_per_node=4 --master_port 2106 scripts/main_3d.py \
+    --feature_size=32 \
+    --batch_size=1 \
+    --roi_x $@ \
+    --roi_y $@ \
+    --roi_z 64 \
     --space_x ${space} \
     --space_y ${space} \
     --space_z ${space} \

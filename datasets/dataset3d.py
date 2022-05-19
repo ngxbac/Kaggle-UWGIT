@@ -173,27 +173,6 @@ def get_loader(args):
                 num_samples=args.num_samples,
                 image_key="image",
             ),
-
-            # transforms.RandFlipd(keys=["image", "label"],
-            #                      prob=args.RandFlipd_prob,
-            #                      spatial_axis=0),
-            # transforms.RandFlipd(keys=["image", "label"],
-            #                      prob=args.RandFlipd_prob,
-            #                      spatial_axis=1),
-            # transforms.RandFlipd(keys=["image", "label"],
-            #                      prob=args.RandFlipd_prob,
-            #                      spatial_axis=2),
-            # transforms.RandRotate90d(
-            #     keys=["image", "label"],
-            #     prob=args.RandRotate90d_prob,
-            #     max_k=3,
-            # ),
-            # transforms.RandScaleIntensityd(keys="image",
-            #                                factors=0.1,
-            #                                prob=args.RandScaleIntensityd_prob),
-            # transforms.RandShiftIntensityd(keys="image",
-            #                                offsets=0.1,
-            #                                prob=args.RandShiftIntensityd_prob)
     ]
 
     train_transforms = base_transforms + advanced_transforms
@@ -202,7 +181,16 @@ def get_loader(args):
         train_transforms += [ConvertToMultiChannel(keys=['label'])]
 
     train_transforms += [transforms.ToTensord(keys=["image", "label"])]
-    valid_transforms = base_transforms + [transforms.ToTensord(keys=["image", "label"])]
+
+    if args.multilabel:
+        valid_transforms = base_transforms + [
+            ConvertToMultiChannel(keys=['label']),
+            transforms.ToTensord(keys=["image", "label"])
+        ]
+    else:
+        valid_transforms = base_transforms + [
+            transforms.ToTensord(keys=["image", "label"])
+        ]
 
     train_transforms = transforms.Compose(train_transforms)
     valid_transforms = transforms.Compose(valid_transforms)
@@ -228,7 +216,7 @@ def get_loader(args):
             train_ds = data.CacheDataset(
                 data=train_files,
                 transform=train_transforms,
-                # cache_num=24,
+                cache_num=24,
                 cache_rate=1.0,
                 num_workers=args.num_workers,
             )

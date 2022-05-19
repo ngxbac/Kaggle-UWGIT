@@ -37,11 +37,12 @@ from monai.losses import DiceLoss, DiceCELoss, DiceFocalLoss
 from monai.metrics import DiceMetric, HausdorffDistanceMetric
 from monai.utils.enums import MetricReduction
 from monai.transforms import AsDiscrete, Activations, Compose, EnsureType
-from monai.networks.nets import DynUNet, SegResNet, UNETR, VNet
+from monai.networks.nets import DynUNet, SegResNet, UNETR, VNet, UNet, RegUNet, SwinUNETR
 from monai.data import decollate_batch
 
 # from models.swin_unetr import SwinUNETR
 from models.coplenet import CopleNet
+from models.efficient_unet import EfficientUnet
 
 
 def get_args_parser():
@@ -249,6 +250,33 @@ def get_model(args):
             spatial_dims=2,
             in_channels=args.in_channels,
             out_channels=args.out_channels,
+        )
+    elif args.model_name == 'unet':
+        model = UNet(
+            spatial_dims=3,
+            in_channels=args.in_channels,
+            out_channels=args.out_channels,
+            channels=(16, 32, 64, 128, 256),
+            strides=(2, 2, 2, 2),
+	    num_res_units=2,
+	    norm="batch",
+        )
+    elif 'efficientnet' in args.model_name:
+        model = EfficientUnet(
+           model_name=args.model_name,
+           in_channels=args.in_channels,
+           output_channels=args.out_channels,
+           spatial_dims=3,
+           pretrained=False,
+           norm=args.norm_name,
+        )
+    elif args.model_name == 'regunet':
+        model = RegUNet(
+           in_channels=args.in_channels,
+           out_channels=args.out_channels,
+           num_channel_initial=8,
+           spatial_dims=3,
+           depth=4
         )
     else:
         raise ValueError('Unsupported model ' + str(args.model_name))

@@ -159,20 +159,54 @@ def get_loader(args):
                                     axcodes="RAS"),
             transforms.ScaleIntensityRanged(
                 keys=["image"], a_min=0, a_max=16384, b_min=0.0, b_max=1.0, clip=True),
-            transforms.CropForegroundd(
-                keys=["image", "label"], source_key="image"),
+            # transforms.CropForegroundd(
+            #     keys=["image", "label"], source_key="image"),
+            # transforms.Lambdad(keys="image", func=lambda x: x / x.max()),
     ]
 
     advanced_transforms = [
-            transforms.RandCropByPosNegLabeld(
-                keys=["image", "label"],
-                label_key="label",
-                spatial_size=(args.roi_x, args.roi_y, args.roi_z),
-                pos=1,
-                neg=1,
-                num_samples=args.num_samples,
-                image_key="image",
-            ),
+            # transforms.RandCropByPosNegLabeld(
+            #     keys=["image", "label"],
+            #     label_key="label",
+            #     spatial_size=(args.roi_x, args.roi_y, args.roi_z),
+            #     pos=1,
+            #     neg=1,
+            #     num_samples=args.num_samples,
+            #     image_key="image",
+            # ),
+        transforms.RandSpatialCropd(
+            keys=("image", "label"),
+            roi_size=(args.roi_x, args.roi_y, args.roi_z),
+            random_size=False,
+        ),
+
+        transforms.RandFlipd(keys=("image", "label"), prob=0.5, spatial_axis=[1]),
+        transforms.RandAffined(
+            keys=("image", "label"),
+            prob=0.5,
+            rotate_range=np.pi / 12,
+            translate_range=(args.roi_x*0.0625, args.roi_y*0.0625),
+            scale_range=(0.1, 0.1),
+            mode="nearest",
+            padding_mode="reflection",
+        ),
+        transforms.OneOf(
+            [
+                transforms.RandGridDistortiond(
+                    keys=("image", "label"), prob=0.5, distort_limit=(-0.05, 0.05), mode="nearest", padding_mode="reflection"),
+                transforms.RandCoarseDropoutd(
+                    keys=("image", "label"),
+                    holes=5,
+                    max_holes=8,
+                    spatial_size=(1, 1, 1),
+                    max_spatial_size=(12, 12, 12),
+                    fill_value=0.0,
+                    prob=0.5,
+                ),
+            ]
+        ),
+        transforms.RandScaleIntensityd(keys="image", factors=(-0.2, 0.2), prob=0.5),
+        transforms.RandShiftIntensityd(keys="image", offsets=(-0.1, 0.1), prob=0.5),
     ]
 
     train_transforms = base_transforms + advanced_transforms

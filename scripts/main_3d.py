@@ -43,6 +43,7 @@ from monai.data import decollate_batch
 # from models.swin_unetr import SwinUNETR
 from models.coplenet import CopleNet
 from models.efficient_unet import EfficientUnet
+from models.medzoo import *
 
 
 def get_args_parser():
@@ -278,6 +279,31 @@ def get_model(args):
            spatial_dims=3,
            depth=4
         )
+    elif args.model_name == 'resnetmed3d':
+        model = generate_resnet3d(
+            in_channels=args.in_channels,
+            classes=args.out_channels,
+            model_depth=18
+        )
+    elif args.model_name == 'densenet2':
+        model = DualPathDenseNet(
+            in_channels=args.in_channels,
+            classes=args.out_channels
+        )
+    elif args.model_name == 'skipdensenet':
+        model = SkipDenseNet3D(
+            growth_rate=16,
+            num_init_features=32,
+            drop_rate=0.1,
+            in_channels=1,
+            classes=args.out_channels
+        )
+    elif args.model_name == 'unet3d':
+        model = UNet3D(
+            in_channels=args.in_channels,
+            n_classes=args.out_channels,
+            base_n_filter=8
+        )
     else:
         raise ValueError('Unsupported model ' + str(args.model_name))
 
@@ -302,7 +328,7 @@ def get_model(args):
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
     model = nn.parallel.DistributedDataParallel(
-        model, device_ids=[args.gpu], find_unused_parameters=True)
+        model, device_ids=[args.gpu])
 
     return model
 
@@ -365,11 +391,11 @@ def train(args):
     if os.path.isfile(args.resume):
         utils.restart_from_checkpoint(
             os.path.join(args.resume),
-            # run_variables=to_restore,
+            run_variables=to_restore,
             state_dict=model,
-            # optimizer=optimizer,
-            # fp16_scaler=fp16_scaler,
-            # scheduler=scheduler,
+            optimizer=optimizer,
+            fp16_scaler=fp16_scaler,
+            scheduler=scheduler,
             # best_score=best_score
         )
 

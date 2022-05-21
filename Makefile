@@ -22,13 +22,16 @@ train:
 
 
 roi_size=64
-batch_size_3d=8
+batch_size_3d=1
 epochs_3d=200
 space=1.5
 model=segresnet
 num_samples=4
+out_channels=4
 resume=''
-logdir=logs/3d/multiclass/${model}_${roi_size}_${fold}_${epochs_3d}ep
+lr=0.001
+data_dir=""
+logdir=logs/3d/ft/${model}_${roi_size}_${fold}_${epochs_3d}ep
 
 train_3d:
 	NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE} PYTHONPATH=. \
@@ -43,15 +46,16 @@ train_3d:
     --space_z ${space} \
     --model_name ${model} \
     --fold ${fold} \
-    --out_channels 3 \
+    --out_channels ${out_channels} \
 	--num_samples ${num_samples} \
     --infer_overlap=0.5 \
-    --data_dir=data/nii-data-2 \
+    --data_dir=${data_dir} \
 	--output_dir ${logdir} \
 	--batch_size_per_gpu ${batch_size_3d} \
 	--epochs ${epochs_3d} \
 	--res_block \
 	--resume ${resume} \
+	--lr ${lr} \
 	--use_fp16 True
 
 

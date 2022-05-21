@@ -334,10 +334,10 @@ def get_model(args):
 
 
 def train(args):
-    if args.multilabel:
-        args.out_channels = 3
-    else:
-        args.out_channels = 4
+    # if args.multilabel:
+    #     args.out_channels = 3
+    # else:
+    #     args.out_channels = 4
 
     # if not args.multilabel:
     #     args.lr = args.lr / 10
@@ -389,15 +389,25 @@ def train(args):
     is_save_best = False
 
     if os.path.isfile(args.resume):
-        utils.restart_from_checkpoint(
-            os.path.join(args.resume),
-            run_variables=to_restore,
-            state_dict=model,
-            optimizer=optimizer,
-            fp16_scaler=fp16_scaler,
-            scheduler=scheduler,
-            # best_score=best_score
-        )
+        # utils.restart_from_checkpoint(
+        #     os.path.join(args.resume),
+        #     # run_variables=to_restore,
+        #     state_dict=model,
+        #     # optimizer=optimizer,
+        #     # fp16_scaler=fp16_scaler,
+        #     # scheduler=scheduler,
+        #     # best_score=best_score
+        # )
+
+        checkpoint = torch.load(args.resume, map_location="cpu")['state_dict']
+        current_state_dict = model.state_dict()
+        for k, v in current_state_dict.items():
+            if checkpoint[k].shape == current_state_dict[k].shape:
+                current_state_dict[k] = checkpoint[k]
+            else:
+                print("[+] {} is not the same".format(k))
+
+        model.load_state_dict(current_state_dict)
 
     start_epoch = to_restore["epoch"]
 

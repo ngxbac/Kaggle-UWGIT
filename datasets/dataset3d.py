@@ -109,7 +109,7 @@ class ConvertToMultiChannel(transforms.MapTransform):
         return d
 
 
-def get_loader(args):
+def get_uw_files(args):
     from glob import glob
     from sklearn.model_selection import KFold
     data_dir = args.data_dir
@@ -152,33 +152,77 @@ def get_loader(args):
     val_files = [{"image": img, "label": seg}
                  for img, seg in zip(val_images, val_segs)]
 
+    return train_files, val_files
+
+
+def get_thor_oar_files(args):
+    import random
+    data_dir = args.data_dir
+    patient_ids = list(range(1, 51))
+    random.shuffle(patient_ids)
+    train_ids = patient_ids[:-5]
+    valid_ids = patient_ids[-5:]
+
+    train_files = [{
+        "image": os.path.join(data_dir, str(i), 'data.nii.gz'),
+        "label": os.path.join(data_dir, str(i), 'label.nii.gz')
+    } for i in train_ids]
+
+    valid_files = [{
+        "image": os.path.join(data_dir, str(i), 'data.nii.gz'),
+        "label": os.path.join(data_dir, str(i), 'label.nii.gz')
+    } for i in valid_ids]
+
+    return train_files, valid_files
+
+
+
+def get_loader(args):
+    if 'structseg' in args.data_dir:
+        train_files, val_files = get_thor_oar_files(args)
+    else:
+        train_files, val_files = get_uw_files(args)
+
     base_transforms = [
             transforms.LoadImaged(keys=["image", "label"]),
             transforms.AddChanneld(keys=["image", "label"]),
             transforms.Orientationd(keys=["image", "label"],
                                     axcodes="RAS"),
-            transforms.ScaleIntensityRanged(
-                keys=["image"], a_min=0, a_max=16384, b_min=0.0, b_max=1.0, clip=True),
+            # transforms.ScaleIntensityRanged(
+            #     keys=["image"], a_min=0, a_max=16384, b_min=0.0, b_max=1.0, clip=True),
             # transforms.CropForegroundd(
             #     keys=["image", "label"], source_key="image"),
-            # transforms.Lambdad(keys="image", func=lambda x: x / x.max()),
+            transforms.Lambdad(keys="image", func=lambda x: x / x.max()),
     ]
 
     advanced_transforms = [
-            # transforms.RandCropByPosNegLabeld(
-            #     keys=["image", "label"],
-            #     label_key="label",
-            #     spatial_size=(args.roi_x, args.roi_y, args.roi_z),
-            #     pos=1,
-            #     neg=1,
-            #     num_samples=args.num_samples,
-            #     image_key="image",
-            # ),
-        transforms.RandSpatialCropd(
-            keys=("image", "label"),
-            roi_size=(args.roi_x, args.roi_y, args.roi_z),
-            random_size=False,
+        transforms.RandCropByPosNegLabeld(
+            keys=["image", "label"],
+            label_key="label",
+            spatial_size=(args.roi_x, args.roi_y, args.roi_z),
+            pos=1,
+            neg=1,
+            num_samples=args.num_samples,
+            image_key="image",
         ),
+
+        # transforms.RandSpatialCropd(
+        #     keys=("image", "label"),
+        #     roi_size=(args.roi_x, args.roi_y, args.roi_z),
+        #     random_size=False,
+        # ),
+
+        # transforms.RandSpatialCropd(
+        #     keys=("image", "label"),
+        #     roi_size=(-1, -1, args.roi_z),
+        #     random_size=False,
+        # ),
+
+        # transforms.Resized(
+        #     keys=('image', 'label'),
+        #     spatial_size=(args.roi_x, args.roi_y, args.roi_z),
+        #     mode='nearest',
+        # ),
 
         transforms.RandFlipd(keys=("image", "label"), prob=0.5, spatial_axis=[1]),
         transforms.RandAffined(

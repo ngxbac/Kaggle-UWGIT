@@ -14,7 +14,7 @@ import numpy as np
 import cv2
 from utils import dino as utils
 import timm
-from datasets.dataset25d import Dataset25D, get_transform
+from datasets.uw_gi import UWGI, get_transform
 import segmentation_models_pytorch as smp
 from criterions.segmentation import criterion_2d, dice_coef, iou_coef
 
@@ -26,6 +26,7 @@ def get_args_parser():
     # * Model
     # dataset parameters
     parser.add_argument('--csv', default='train_valid.csv')
+    parser.add_argument('--data_dir', default='data/uw-gi-25d/')
     parser.add_argument('--input_size', default="320,384", type=str)
     parser.add_argument('--fold', default=0, type=int)
     parser.add_argument('--num_classes', default=3, type=int)
@@ -98,9 +99,9 @@ def get_dataset(args, name='train'):
     valid_transform = get_transform('valid', image_sizes)
 
     if name == 'train':
-        train_dataset = Dataset25D(
+        train_dataset = UWGI(
             csv=args.csv,
-            label=True,
+            data_dir=args.data_dir,
             is_train=True,
             fold=args.fold,
             transforms=train_transform
@@ -120,9 +121,9 @@ def get_dataset(args, name='train'):
         return train_data_loader
 
     elif name == 'valid':
-        valid_dataset = Dataset25D(
+        valid_dataset = UWGI(
             csv=args.csv,
-            label=True,
+            data_dir=args.data_dir,
             is_train=False,
             fold=args.fold,
             transforms=valid_transform

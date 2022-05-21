@@ -154,7 +154,7 @@ def restart_from_checkpoint(ckp_path, run_variables=None, **kwargs):
     for key, value in kwargs.items():
         if key in checkpoint and value is not None:
             try:
-                msg = value.load_state_dict(checkpoint[key], strict=False)
+                msg = value.load_state_dict(checkpoint[key], strict=True)
                 print("=> loaded '{}' from checkpoint '{}' with msg {}".format(
                     key, ckp_path, msg))
             except TypeError:

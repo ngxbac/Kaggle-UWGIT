@@ -15,7 +15,7 @@ import numpy as np
 import torch
 import pandas as pd
 from monai import transforms, data
-from monai.data import load_decathlon_datalist
+# from monai.data import load_decathlon_datalist
 
 
 class Sampler(torch.utils.data.Sampler):
@@ -109,116 +109,172 @@ class ConvertToMultiChannel(transforms.MapTransform):
         return d
 
 
-def get_loader(args):
+def get_uw_files(args):
     from glob import glob
     from sklearn.model_selection import KFold
     data_dir = args.data_dir
     print(data_dir)
 
     train_fold = args.fold
-    # df = pd.read_csv('train_valid_case.csv')
-    # train_df = df[df['fold'] != train_fold]
-    # valid_df = df[df['fold'] == train_fold]
+    df = pd.read_csv('train_valid_case.csv')
+    train_df = df[df['fold'] != train_fold]
+    valid_df = df[df['fold'] == train_fold]
 
-    # train_cases = train_df['case'].unique()
-    # valid_cases = valid_df['case'].unique()
+    train_cases = train_df['case'].unique()
+    valid_cases = valid_df['case'].unique()
 
     images = sorted(glob(os.path.join(data_dir, "train/*/*.nii.gz")))
 
-    all_cases = [image.split("_")[-2] for image in images]
-    unique_cases = np.unique(all_cases)
-    kf = KFold(n_splits=5, random_state=2411, shuffle=True)
-    for fold, (train_idx, valid_idx) in enumerate(kf.split(unique_cases)):
-        if fold == train_fold:
-            train_cases = unique_cases[train_idx]
-            valid_cases = unique_cases[valid_idx]
+    # all_cases = [image.split("_")[-2] for image in images]
+    # unique_cases = np.unique(all_cases)
+    # kf = KFold(n_splits=5, random_state=2411, shuffle=True)
+    # for fold, (train_idx, valid_idx) in enumerate(kf.split(unique_cases)):
+    #     if fold == train_fold:
+    #         train_cases = unique_cases[train_idx]
+    #         valid_cases = unique_cases[valid_idx]
+
+    if args.multilabel:
+        mask_folder = 'mask-multi'
+    else:
+        mask_folder = 'mask-102'
 
     train_images = [image for image in images if image.split(
         "/")[-2] in train_cases]
-    train_segs = [image.replace('train', 'mask-multi')
+    train_segs = [image.replace('train', mask_folder)
                   for image in train_images]
 
     val_images = [image for image in images if image.split(
         "/")[-2] in valid_cases]
-    val_segs = [image.replace('train', 'mask-multi') for image in val_images]
+    val_segs = [image.replace('train', mask_folder) for image in val_images]
 
     train_files = [{"image": img, "label": seg}
                    for img, seg in zip(train_images, train_segs)]
     val_files = [{"image": img, "label": seg}
                  for img, seg in zip(val_images, val_segs)]
 
-    train_transform = transforms.Compose(
-        [
+    return train_files, val_files
+
+
+def get_thor_oar_files(args):
+    import random
+    data_dir = args.data_dir
+    patient_ids = list(range(1, 51))
+    random.shuffle(patient_ids)
+    train_ids = patient_ids[:-5]
+    valid_ids = patient_ids[-5:]
+
+    train_files = [{
+        "image": os.path.join(data_dir, str(i), 'data.nii.gz'),
+        "label": os.path.join(data_dir, str(i), 'label.nii.gz')
+    } for i in train_ids]
+
+    valid_files = [{
+        "image": os.path.join(data_dir, str(i), 'data.nii.gz'),
+        "label": os.path.join(data_dir, str(i), 'label.nii.gz')
+    } for i in valid_ids]
+
+    return train_files, valid_files
+
+
+
+def get_loader(args):
+    if 'structseg' in args.data_dir:
+        train_files, val_files = get_thor_oar_files(args)
+    else:
+        train_files, val_files = get_uw_files(args)
+
+    base_transforms = [
             transforms.LoadImaged(keys=["image", "label"]),
             transforms.AddChanneld(keys=["image", "label"]),
-            ConvertToMultiChannel(keys=['label']),
             transforms.Orientationd(keys=["image", "label"],
                                     axcodes="RAS"),
+            # transforms.ScaleIntensityRanged(
+            #     keys=["image"], a_min=0, a_max=16384, b_min=0.0, b_max=1.0, clip=True),
+            # transforms.CropForegroundd(
+            #     keys=["image", "label"], source_key="image"),
+            transforms.Lambdad(keys="image", func=lambda x: x / x.max()),
+    ]
 
-            transforms.ScaleIntensityRanged(
-                keys=["image"], a_min=0, a_max=16384, b_min=0.0, b_max=1.0, clip=True),
+    advanced_transforms = [
+        transforms.RandCropByPosNegLabeld(
+            keys=["image", "label"],
+            label_key="label",
+            spatial_size=(args.roi_x, args.roi_y, args.roi_z),
+            pos=1,
+            neg=1,
+            num_samples=args.num_samples,
+            image_key="image",
+        ),
 
-            # transforms.NormalizeIntensityd(
-            #     keys=["image"], nonzero=True, channel_wise=True),
-            transforms.CropForegroundd(
-                keys=["image", "label"], source_key="image"),
+        # transforms.RandSpatialCropd(
+        #     keys=("image", "label"),
+        #     roi_size=(args.roi_x, args.roi_y, args.roi_z),
+        #     random_size=False,
+        # ),
 
-            transforms.RandCropByPosNegLabeld(
-                keys=["image", "label"],
-                label_key="label",
-                spatial_size=(args.roi_x, args.roi_y, args.roi_z),
-                pos=1,
-                neg=1,
-                num_samples=args.num_samples,
-                image_key="image",
-                # image_threshold=0,
-            ),
+        # transforms.RandSpatialCropd(
+        #     keys=("image", "label"),
+        #     roi_size=(-1, -1, args.roi_z),
+        #     random_size=False,
+        # ),
 
-            transforms.RandFlipd(keys=["image", "label"],
-                                 prob=args.RandFlipd_prob,
-                                 spatial_axis=0),
-            transforms.RandFlipd(keys=["image", "label"],
-                                 prob=args.RandFlipd_prob,
-                                 spatial_axis=1),
-            transforms.RandFlipd(keys=["image", "label"],
-                                 prob=args.RandFlipd_prob,
-                                 spatial_axis=2),
-            transforms.RandRotate90d(
-                keys=["image", "label"],
-                prob=args.RandRotate90d_prob,
-                max_k=3,
-            ),
-            transforms.RandScaleIntensityd(keys="image",
-                                           factors=0.1,
-                                           prob=args.RandScaleIntensityd_prob),
-            transforms.RandShiftIntensityd(keys="image",
-                                           offsets=0.1,
-                                           prob=args.RandShiftIntensityd_prob),
+        # transforms.Resized(
+        #     keys=('image', 'label'),
+        #     spatial_size=(args.roi_x, args.roi_y, args.roi_z),
+        #     mode='nearest',
+        # ),
 
-            transforms.ToTensord(keys=["image", "label"]),
-        ]
-    )
-    val_transform = transforms.Compose(
-        [
-            transforms.LoadImaged(keys=["image", "label"]),
-            transforms.AddChanneld(keys=["image", "label"]),
+        transforms.RandFlipd(keys=("image", "label"), prob=0.5, spatial_axis=[1]),
+        transforms.RandAffined(
+            keys=("image", "label"),
+            prob=0.5,
+            rotate_range=np.pi / 12,
+            translate_range=(args.roi_x*0.0625, args.roi_y*0.0625),
+            scale_range=(0.1, 0.1),
+            mode="nearest",
+            padding_mode="reflection",
+        ),
+        transforms.OneOf(
+            [
+                transforms.RandGridDistortiond(
+                    keys=("image", "label"), prob=0.5, distort_limit=(-0.05, 0.05), mode="nearest", padding_mode="reflection"),
+                transforms.RandCoarseDropoutd(
+                    keys=("image", "label"),
+                    holes=5,
+                    max_holes=8,
+                    spatial_size=(1, 1, 1),
+                    max_spatial_size=(12, 12, 12),
+                    fill_value=0.0,
+                    prob=0.5,
+                ),
+            ]
+        ),
+        transforms.RandScaleIntensityd(keys="image", factors=(-0.2, 0.2), prob=0.5),
+        transforms.RandShiftIntensityd(keys="image", offsets=(-0.1, 0.1), prob=0.5),
+    ]
+
+    train_transforms = base_transforms + advanced_transforms
+
+    if args.multilabel:
+        train_transforms += [ConvertToMultiChannel(keys=['label'])]
+
+    train_transforms += [transforms.ToTensord(keys=["image", "label"])]
+
+    if args.multilabel:
+        valid_transforms = base_transforms + [
             ConvertToMultiChannel(keys=['label']),
-            transforms.Orientationd(keys=["image", "label"],
-                                    axcodes="RAS"),
-
-            transforms.ScaleIntensityRanged(
-                keys=["image"], a_min=0, a_max=16384, b_min=0.0, b_max=1.0, clip=True),
-
-            # transforms.NormalizeIntensityd(
-            #     keys=["image"], nonzero=True, channel_wise=True),
-            transforms.CropForegroundd(
-                keys=["image", "label"], source_key="image"),
-            transforms.ToTensord(keys=["image", "label"]),
+            transforms.ToTensord(keys=["image", "label"])
         ]
-    )
+    else:
+        valid_transforms = base_transforms + [
+            transforms.ToTensord(keys=["image", "label"])
+        ]
+
+    train_transforms = transforms.Compose(train_transforms)
+    valid_transforms = transforms.Compose(valid_transforms)
 
     if args.test_mode:
-        transform = val_transform
+        transform = val_transforms
         test_ds = data.Dataset(data=val_files, transform=transform)
         test_sampler = Sampler(
             test_ds, shuffle=False)
@@ -231,17 +287,13 @@ def get_loader(args):
                                       persistent_workers=True)
         loader = [test_loader, transform]
     else:
-        # datalist = load_decathlon_datalist(datalist_json,
-        #                                    True,
-        #                                    "training",
-        #                                    base_dir=data_dir)
         if args.use_normal_dataset:
             train_ds = data.Dataset(
-                data=train_files, transform=train_transform)
+                data=train_files, transform=train_transforms)
         else:
             train_ds = data.CacheDataset(
                 data=train_files,
-                transform=train_transform,
+                transform=train_transforms,
                 cache_num=24,
                 cache_rate=1.0,
                 num_workers=args.num_workers,
@@ -258,7 +310,7 @@ def get_loader(args):
         #                                     True,
         #                                     "validation",
         #                                     base_dir=data_dir)
-        val_ds = data.Dataset(data=val_files, transform=val_transform)
+        val_ds = data.Dataset(data=val_files, transform=valid_transforms)
         val_sampler = Sampler(
             val_ds, shuffle=False)
         val_loader = data.DataLoader(val_ds,

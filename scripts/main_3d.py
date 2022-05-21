@@ -37,8 +37,13 @@ from monai.losses import DiceLoss, DiceCELoss, DiceFocalLoss
 from monai.metrics import DiceMetric, HausdorffDistanceMetric
 from monai.utils.enums import MetricReduction
 from monai.transforms import AsDiscrete, Activations, Compose, EnsureType
-from monai.networks.nets import DynUNet, SegResNet, UNETR, BasicUNet
+from monai.networks.nets import DynUNet, SegResNet, UNETR, VNet, UNet, RegUNet, SwinUNETR
 from monai.data import decollate_batch
+
+# from models.swin_unetr import SwinUNETR
+from models.coplenet import CopleNet
+from models.efficient_unet import EfficientUnet
+from models.medzoo import *
 
 
 def get_args_parser():
@@ -50,6 +55,8 @@ def get_args_parser():
     parser.add_argument('--data_dir', default='/dataset/dataset0/',
                         type=str, help='dataset directory')
     parser.add_argument('--fold', default=0, type=int)
+    parser.add_argument('--multilabel', action='store_true',
+                        help='')
 
     # Settings
     parser.add_argument('--model_name', default='unetr',
@@ -147,7 +154,7 @@ def get_args_parser():
     parser.add_argument("--local_rank", default=0, type=int,
                         help="Please ignore and do not set this argument.")
     parser.add_argument('--pred', type=utils.bool_flag, default=False)
-    parser.add_argument('--resume', type=utils.bool_flag, default=False)
+    parser.add_argument('--resume', type=str, default='')
     parser.add_argument('--test_mode', type=utils.bool_flag, default=False)
     return parser
 
@@ -214,6 +221,7 @@ def get_model(args):
             strides=strides,
             upsample_kernel_size=strides[1:],
             norm_name=args.norm_name,
+            res_block=args.res_block,
             deep_supervision=False
             # deep_supr_num=1
         )
@@ -227,10 +235,74 @@ def get_model(args):
             out_channels=args.out_channels,
             dropout_prob=0.2,
         )
-    elif args.model_name == 'basicunet':
-        model = BasicUNet(
+    elif args.model_name == 'swinunet':
+        model = SwinUNETR(
+            img_size=(args.roi_x, args.roi_y, args.roi_z),
             in_channels=args.in_channels,
-            out_channels=args.out_channels
+            out_channels=args.out_channels,
+        )
+    elif args.model_name == 'vnet':
+        model = VNet(
+            in_channels=args.in_channels,
+            out_channels=args.out_channels,
+        )
+    elif args.model_name == 'coplenet':
+        model = CopleNet(
+            spatial_dims=2,
+            in_channels=args.in_channels,
+            out_channels=args.out_channels,
+        )
+    elif args.model_name == 'unet':
+        model = UNet(
+            spatial_dims=3,
+            in_channels=args.in_channels,
+            out_channels=args.out_channels,
+            channels=(16, 32, 64, 128, 256),
+            strides=(2, 2, 2, 2),
+	    num_res_units=2,
+	    norm="batch",
+        )
+    elif 'efficientnet' in args.model_name:
+        model = EfficientUnet(
+           model_name=args.model_name,
+           in_channels=args.in_channels,
+           output_channels=args.out_channels,
+           spatial_dims=3,
+           pretrained=False,
+           norm=args.norm_name,
+        )
+    elif args.model_name == 'regunet':
+        model = RegUNet(
+           in_channels=args.in_channels,
+           out_channels=args.out_channels,
+           num_channel_initial=8,
+           spatial_dims=3,
+           depth=4
+        )
+    elif args.model_name == 'resnetmed3d':
+        model = generate_resnet3d(
+            in_channels=args.in_channels,
+            classes=args.out_channels,
+            model_depth=18
+        )
+    elif args.model_name == 'densenet2':
+        model = DualPathDenseNet(
+            in_channels=args.in_channels,
+            classes=args.out_channels
+        )
+    elif args.model_name == 'skipdensenet':
+        model = SkipDenseNet3D(
+            growth_rate=16,
+            num_init_features=32,
+            drop_rate=0.1,
+            in_channels=1,
+            classes=args.out_channels
+        )
+    elif args.model_name == 'unet3d':
+        model = UNet3D(
+            in_channels=args.in_channels,
+            n_classes=args.out_channels,
+            base_n_filter=8
         )
     else:
         raise ValueError('Unsupported model ' + str(args.model_name))
@@ -256,18 +328,22 @@ def get_model(args):
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
     model = nn.parallel.DistributedDataParallel(
-        model, device_ids=[args.gpu], find_unused_parameters=True)
+        model, device_ids=[args.gpu])
 
     return model
 
 
 def train(args):
+    # if args.multilabel:
+    #     args.out_channels = 3
+    # else:
+    #     args.out_channels = 4
+
+    # if not args.multilabel:
+    #     args.lr = args.lr / 10
+
     utils.init_distributed_mode(args)
     utils.fix_random_seeds(args.seed)
-    # lr = (args.lr / 64) * torch.distributed.get_world_size() * \
-    #     args.batch_size_per_gpu
-
-    # args.lr = lr
     print("git:\n  {}\n".format(utils.get_sha()))
     print("\n".join("%s: %s" % (k, str(v))
           for k, v in sorted(dict(vars(args)).items())))
@@ -279,11 +355,20 @@ def train(args):
     model = get_model(args)
 
     # ============ preparing loss ... ============
-    criterion = DiceFocalLoss(to_onehot_y=False,
-                              sigmoid=True,
-                              squared_pred=False,
-                              smooth_nr=args.smooth_nr,
-                              smooth_dr=args.smooth_dr)
+    if args.multilabel:
+        criterion = DiceFocalLoss(to_onehot_y=False,
+                                  sigmoid=True,
+                                  squared_pred=False,
+                                  smooth_nr=args.smooth_nr,
+                                  smooth_dr=args.smooth_dr)
+    else:
+        criterion = DiceCELoss(
+            to_onehot_y=True,
+            softmax=True,
+            squared_pred=True,
+            smooth_nr=args.smooth_nr,
+            smooth_dr=args.smooth_dr
+        )
 
     # ============ preparing optimizer ... ============
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr,
@@ -302,16 +387,27 @@ def train(args):
     to_restore = {"epoch": 0}
     best_score = -np.inf
     is_save_best = False
-    if args.resume:
-        utils.restart_from_checkpoint(
-            os.path.join(args.output_dir, "checkpoint.pth"),
-            run_variables=to_restore,
-            model=model,
-            optimizer=optimizer,
-            fp16_scaler=fp16_scaler,
-            scheduler=scheduler,
-            best_score=best_score
-        )
+
+    if os.path.isfile(args.resume):
+        # utils.restart_from_checkpoint(
+        #     os.path.join(args.resume),
+        #     # run_variables=to_restore,
+        #     state_dict=model,
+        #     # optimizer=optimizer,
+        #     # fp16_scaler=fp16_scaler,
+        #     # scheduler=scheduler,
+        #     # best_score=best_score
+        # )
+
+        checkpoint = torch.load(args.resume, map_location="cpu")['state_dict']
+        current_state_dict = model.state_dict()
+        for k, v in current_state_dict.items():
+            if checkpoint[k].shape == current_state_dict[k].shape:
+                current_state_dict[k] = checkpoint[k]
+            else:
+                print("[+] {} is not the same".format(k))
+
+        model.load_state_dict(current_state_dict)
 
     start_epoch = to_restore["epoch"]
 
@@ -436,23 +532,25 @@ def valid_one_epoch(model, data_loader, epoch, fp16_scaler, args):
 
     # Functions for post evaluation
 
-    # post_label = AsDiscrete(to_onehot=True,
-    #                         n_classes=args.out_channels)
+    if args.multilabel:
+        def post_label(x):
+            return x
 
-    # post_pred = AsDiscrete(argmax=True,
-    #                        to_onehot=True,
-    #                        n_classes=args.out_channels)
+        post_pred = Compose(
+            [EnsureType(), Activations(sigmoid=True), AsDiscrete(threshold=0.5)]
+        )
 
-    def post_label(x):
-        return x
+    else:
 
-    post_pred = Compose(
-        [EnsureType(), Activations(sigmoid=True), AsDiscrete(threshold=0.5)]
-    )
+        post_label = AsDiscrete(to_onehot=True,
+                                n_classes=args.out_channels)
+        post_pred = AsDiscrete(argmax=True,
+                               to_onehot=True,
+                               n_classes=args.out_channels)
 
     metric_fn = DiceMetric(include_background=True,
-                           reduction=MetricReduction.MEAN,
-                           get_not_nans=True)
+                       reduction=MetricReduction.MEAN,
+                       get_not_nans=True)
 
     model_inferer = partial(sliding_window_inference,
                             roi_size=inf_size,

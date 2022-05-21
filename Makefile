@@ -1,16 +1,15 @@
-bg=./data/bg/
 fold=0
 backbone=efficientnet-b0
 batch_size=32
-input_size=320,384
+input_size=256,256
 epochs=30
 NCCL_P2P_DISABLE=0
 output_dir=./logs/25D/Unet/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_bndist_lr2e3_scale
 
 train:
-	CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE} PYTHONPATH=. \
-	python -u -m torch.distributed.launch --nproc_per_node=8 --master_port 2106 scripts/main_25d.py \
-	--csv train_valid.csv \
+	CUDA_VISIBLE_DEVICES=0 NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE} PYTHONPATH=. \
+	python -u -m torch.distributed.launch --nproc_per_node=1 --master_port 2106 scripts/main_25d.py \
+	--csv train_valid_case.csv \
 	--fold ${fold} \
 	--num_classes 3 \
 	--backbone ${backbone} \

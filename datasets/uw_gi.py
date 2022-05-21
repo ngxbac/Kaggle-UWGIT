@@ -56,12 +56,20 @@ class UWGI(torch.utils.data.Dataset):
         mask = np.transpose(mask, (1, 2, 0))
         return mask
 
-    def __getitem__(self, index):
-        image = self.images[index]
-        mask = self.get_mask(image)
-        image = np.load(image)
-        image = image / image.max()
+    def get_case_id(self, image_path):
+        return image_path.split("/")[-3]
 
+    def get_day(self, image_path):
+        return image_path.split("/")[-2]
+
+    def get_slice(self, image_path):
+        return image_path.split("/")[-1]
+
+    def __getitem__(self, index):
+        image_path = self.images[index]
+        mask = self.get_mask(image_path)
+        image = np.load(image_path)
+        image = image / image.max()
 
         ret = self.transforms(image=image, mask=mask)
         image = ret['image']
@@ -70,9 +78,15 @@ class UWGI(torch.utils.data.Dataset):
         mask = mask.astype(np.float32)
         image = np.transpose(image, (2, 0, 1)).astype(np.float32)
         mask = np.transpose(mask, (2, 0, 1)).astype(np.float32)
-        # print(mask.shape, image.shape)
+
+        case_id = self.get_case_id(image_path)
+        day = self.get_day(image_path)
+        slice = self.get_slice(image_path)
 
         return {
             'image': image,
-            'target': mask
+            'target': mask,
+            'case_id': case_id,
+            'day': day,
+            'slice': slice
         }

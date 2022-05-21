@@ -4,11 +4,11 @@ batch_size=32
 input_size=256,256
 epochs=30
 NCCL_P2P_DISABLE=0
-output_dir=./logs/25D/Unet/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_bndist_lr2e3_scale
+output_dir=./logs/25D/Unet/${backbone}_is${input_size}_bs${batch_size}_e${epochs}
 
 train:
-	CUDA_VISIBLE_DEVICES=0 NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE} PYTHONPATH=. \
-	python -u -m torch.distributed.launch --nproc_per_node=1 --master_port 2106 scripts/main_25d.py \
+	PYTHONPATH=. \
+	python -u -m torch.distributed.launch --nproc_per_node=4 --master_port 2106 scripts/main_25d.py \
 	--csv train_valid_case.csv \
 	--fold ${fold} \
 	--num_classes 3 \
@@ -17,7 +17,7 @@ train:
 	--batch_size_per_gpu ${batch_size} \
 	--input_size ${input_size} \
 	--epochs ${epochs} \
-	--use_fp16 False
+	--use_fp16 True
 
 
 roi_size=64

@@ -200,8 +200,7 @@ def train(args):
     print(f"Loss, optimizer and schedulers ready.")
 
     # ============ optionally resume training ... ============
-    to_restore = {"epoch": 0}
-    best_score = -np.inf
+    to_restore = {"epoch": 0, 'best_score': -np.inf}
     is_save_best = False
     if args.resume:
         utils.restart_from_checkpoint(
@@ -212,9 +211,11 @@ def train(args):
             fp16_scaler=fp16_scaler,
             scheduler=scheduler,
             criterion=criterion,
-            best_score=best_score
         )
     start_epoch = to_restore["epoch"]
+    best_score = to_restore['best_score']
+
+    # valid_stats = valid_one_epoch(model, criterion, valid_loader, optimizer, scheduler, 0, fp16_scaler, False, args)
 
     start_time = time.time()
     print("Starting eyestate training !")
@@ -233,7 +234,11 @@ def train(args):
         valid_stats = train_one_epoch(model, criterion,
                                       valid_loader, optimizer, scheduler, epoch, fp16_scaler, False, args)
 
-        current_score = valid_stats['dice']
+        if 'dice' in valid_stats:
+            current_score = valid_stats['dice']
+        else:
+            current_score = best_score
+
         if current_score > best_score:
             best_score = current_score
             is_save_best = True
@@ -331,6 +336,131 @@ def train_one_epoch(model, criterion, data_loader, optimizer, scheduler, epoch, 
     metric_logger.synchronize_between_processes()
     print(f"[{prefix}] Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+
+def valid_one_epoch(model, criterion, data_loader, optimizer, scheduler, epoch, fp16_scaler, is_train, args):
+    from monai.metrics import DiceMetric, HausdorffDistanceMetric
+    from monai.utils.enums import MetricReduction
+    from utils.comm import all_gather
+    metric_fn = Metric(num_classes=args.num_classes)
+
+    dice_fn = DiceMetric(include_background=True,
+                       reduction=MetricReduction.MEAN,
+                       get_not_nans=True)
+
+    model.eval()
+    prefix = 'VALID'
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    header = 'Epoch: [{}/{}]'.format(epoch, args.epochs)
+
+    meta = {}
+    for batch in metric_logger.log_every(data_loader, 50, header):
+        images = batch['image'].cuda(non_blocking=True)
+        targets = batch['target'].cuda(non_blocking=True)
+        cases = batch['case_id']
+        days = batch['day']
+        slices = batch['slice']
+
+        with torch.cuda.amp.autocast(fp16_scaler is not None):
+            if not is_train:
+                with torch.no_grad():
+                    logits = model(images)
+            else:
+                logits = model(images)
+            loss = criterion(logits, targets)
+            metric_dict = metric_fn(logits, targets)
+
+            logits = logits.sigmoid() > 0.5
+            # logits = logits.d
+            # targets = targets.detach().cpu().numpy()
+
+        bs = images.shape[0]
+        for i in range(bs):
+            pred = logits[i]
+            target = logits[i]
+            case = cases[i]
+            day = days[i]
+            slice = slices[i]
+
+            if not case in meta:
+                meta[case] = {}
+
+            if not day in meta[case]:
+                meta[case][day] = {}
+
+            meta[case][day][slice] = {
+                'gt': target,
+                'pred': pred
+            }
+
+        # print(len(meta))
+        # meta = all_gather(meta)
+        # print(meta)
+        # print("After ", len(meta))
+
+        # logging
+        torch.cuda.synchronize()
+        metric_logger.update(loss=loss.item())
+        metric_logger.update(dice=metric_dict['dice'])
+        metric_logger.update(iou=metric_dict['iou'])
+        # for k, v in metric_dict.items():
+        #     metric_logger.update(**{k: v})
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
+
+    # gather the stats from all processes
+    metric_logger.synchronize_between_processes()
+    print(f"[{prefix}] Averaged stats:", metric_logger)
+    ret_dict = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+    def get_max_slice(day_dict):
+        all_slice_number = []
+        for slice in day_dict.keys():
+            slice_number = int(slice.split(".")[0].split("_")[1])
+            all_slice_number.append(slice_number)
+
+        return max(all_slice_number)
+
+    if utils.is_main_process():
+        meta_list = all_gather(meta)
+        meta_gather = {}
+        for meta in meta_list:
+            for case_id in meta.keys():
+                if not case_id in meta_gather:
+                    meta_gather[case_id] = meta[case_id]
+                else:
+                    for day in meta[case_id].keys():
+                        if not day in meta_gather[case_id]:
+                            meta_gather[case_id][day] = meta[case_id][day]
+                        else:
+                            meta_gather[case_id][day].update(meta[case_id][day])
+
+        scores = []
+        for case_id in meta_gather.keys():
+            for day in meta_gather[case_id].keys():
+                max_slice = get_max_slice(meta_gather[case_id][day])
+
+                all_preds = []
+                all_gts = []
+                for i in range(1, max_slice+1):
+                    i = str(i).zfill(4)
+                    slice_key = f'slice_{i}_image.npy'
+                    all_preds.append(meta_gather[case_id][day][slice_key]['pred'])
+                    all_gts.append(meta_gather[case_id][day][slice_key]['gt'])
+
+                all_preds = torch.stack(all_preds)
+                all_gts = torch.stack(all_gts)
+
+                score = dice_fn(y_pred=[all_preds], y=[all_gts])
+                print(score)
+                scores.append(score)
+
+        mean_dice = np.mean(scores)
+        print(mean_dice)
+
+        ret_dict['dice_3d'] = mean_dice
+
+    return ret_dict
 
 
 if __name__ == '__main__':

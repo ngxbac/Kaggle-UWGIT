@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import segmentation_models_pytorch as smp
 
@@ -40,7 +41,32 @@ def iou_coef(y_true, y_pred, thr=0.5, dim=(2, 3), epsilon=0.001):
 
 
 def criterion_2d(y_pred, y_true):
-    return 0.25*DiceLoss(y_pred, y_true) + 0.25*TverskyLoss(y_pred, y_true) + 0.5 * poly1_focal_loss(y_pred, y_true)
+    return 0.25*BCELoss(y_pred, y_true) + 0.25*TverskyLoss(y_pred, y_true) + 0.5 * poly1_focal_loss(y_pred, y_true)
+
+
+class ComboLoss(nn.Module):
+    def __init__(self, dice=True, tvk=False, poly=False):
+        super(ComboLoss, self).__init__()
+        self.dice = dice
+        self.tvk = tvk
+        self.poly = poly
+
+    def forward(self, y_pred, y_true):
+        loss = 0
+        count = 0
+        if self.dice:
+            loss += BCELoss(y_pred, y_true)
+            count += 1
+
+        if self.tvk:
+            loss += TverskyLoss(y_pred, y_true)
+            count += 1
+
+        if self.poly:
+            loss += poly1_focal_loss(y_pred, y_true)
+            count += 1
+
+        return loss / count
 
 
 from torch.nn.modules.loss import _Loss

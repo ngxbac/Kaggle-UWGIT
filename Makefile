@@ -5,7 +5,11 @@ input_size=256,256
 epochs=30
 NCCL_P2P_DISABLE=0
 prefix=''
-output_dir=./logs/25D/Unet/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
+resume=''
+loss_weights=''
+scheduler='cosine'
+lr=1e-3
+output_dir=./logs/25D_multi/${fold}/Unet/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
 
 train:
 	PYTHONPATH=. \
@@ -18,6 +22,10 @@ train:
 	--batch_size_per_gpu ${batch_size} \
 	--input_size ${input_size} \
 	--epochs ${epochs} \
+	--resume ${resume} \
+	--lr ${lr} \
+	--loss_weights ${loss_weights} \
+	--scheduler ${scheduler} \
 	--use_fp16 True
 
 

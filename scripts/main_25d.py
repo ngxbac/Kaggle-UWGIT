@@ -16,7 +16,7 @@ from utils import dino as utils
 import timm
 from datasets.uw_gi import UWGI, get_transform
 import segmentation_models_pytorch as smp
-from criterions.segmentation import criterion_2d, dice_coef, iou_coef, DiceBceLoss
+from criterions.segmentation import criterion_2d, dice_coef, iou_coef, ComboLoss
 
 
 def get_args_parser():
@@ -31,6 +31,7 @@ def get_args_parser():
     parser.add_argument('--fold', default=0, type=int)
     parser.add_argument('--num_classes', default=3, type=int)
     parser.add_argument('--backbone', default='resnet34', type=str)
+    parser.add_argument('--loss_weights', type=str, default='1,0,0')
 
     # Training/Optimization parameters
     parser.add_argument('--use_fp16', type=utils.bool_flag, default=True, help="""Whether or not
@@ -46,6 +47,7 @@ def get_args_parser():
     parser.add_argument("--lr", default=2e-3, type=float, help="""Learning rate at the end of
         linear warmup (highest LR used during training). The learning rate is linearly scaled
         with the batch size, and specified here for a reference batch size of 256.""")
+    parser.add_argument('--scheduler', default='cosine', type=str)
 
     # Misc
     parser.add_argument('--output_dir', default=".", type=str,
@@ -60,7 +62,7 @@ def get_args_parser():
     parser.add_argument("--local_rank", default=0, type=int,
                         help="Please ignore and do not set this argument.")
     parser.add_argument('--pred', type=utils.bool_flag, default=False)
-    parser.add_argument('--resume', type=utils.bool_flag, default=False)
+    parser.add_argument('--resume', type=str, default='')
     return parser
 
 
@@ -167,10 +169,6 @@ def get_model(args, distributed=True):
 def train(args):
     utils.init_distributed_mode(args)
     utils.fix_random_seeds(args.seed)
-    # lr = (args.lr / 64) * torch.distributed.get_world_size() * \
-    #     args.batch_size_per_gpu
-
-    # args.lr = lr
     print("git:\n  {}\n".format(utils.get_sha()))
     print("\n".join("%s: %s" % (k, str(v))
           for k, v in sorted(dict(vars(args)).items())))
@@ -184,14 +182,22 @@ def train(args):
     model = get_model(args)
 
     # ============ preparing loss ... ============
-    criterion = Criterion()
+    loss_weights = args.loss_weights
+    loss_weights = [int(x) for x in loss_weights.split(",")]
+    criterion = ComboLoss(loss_weights[0], loss_weights[1], loss_weights[2])
 
     # ============ preparing optimizer ... ============
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr,
                                   weight_decay=args.weight_decay)
 
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=len(train_loader) * args.epochs, eta_min=0)
+    if args.scheduler == 'cosine':
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=args.epochs, eta_min=0)
+    else:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='max', patience=2, factor=0.1
+        )
+
     # for mixed precision training
     fp16_scaler = None
     if args.use_fp16:
@@ -202,16 +208,14 @@ def train(args):
     # ============ optionally resume training ... ============
     to_restore = {"epoch": 0, 'best_score': -np.inf}
     is_save_best = False
-    if args.resume:
+    if os.path.isfile(args.resume):
         utils.restart_from_checkpoint(
-            os.path.join(args.output_dir, "checkpoint.pth"),
-            run_variables=to_restore,
+            #os.path.join(args.output_dir, "checkpoint.pth"),
+            args.resume,
             model=model,
-            optimizer=optimizer,
-            fp16_scaler=fp16_scaler,
-            scheduler=scheduler,
-            criterion=criterion,
         )
+
+
     start_epoch = to_restore["epoch"]
     best_score = to_restore['best_score']
 
@@ -234,10 +238,12 @@ def train(args):
         valid_stats = train_one_epoch(model, criterion,
                                       valid_loader, optimizer, scheduler, epoch, fp16_scaler, False, args)
 
-        if 'dice' in valid_stats:
-            current_score = valid_stats['dice']
+
+        current_score = valid_stats['dice']
+        if scheduler.__class__.__name__ == 'ReduceLROnPlateau':
+            scheduler.step(current_score)
         else:
-            current_score = best_score
+            scheduler.step()
 
         if current_score > best_score:
             best_score = current_score
@@ -321,7 +327,6 @@ def train_one_epoch(model, criterion, data_loader, optimizer, scheduler, epoch, 
                 fp16_scaler.step(optimizer)
                 fp16_scaler.update()
 
-            scheduler.step()
 
         # logging
         torch.cuda.synchronize()

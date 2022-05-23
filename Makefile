@@ -1,10 +1,11 @@
 fold=0
-backbone=efficientnet-b0
+backbone=efficientnet-b3
 batch_size=32
 input_size=256,256
 epochs=30
 NCCL_P2P_DISABLE=0
-output_dir=./logs/25D/Unet/${backbone}_is${input_size}_bs${batch_size}_e${epochs}
+prefix=''
+output_dir=./logs/25D/Unet/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
 
 train:
 	PYTHONPATH=. \
@@ -30,11 +31,11 @@ out_channels=4
 resume=''
 lr=0.001
 data_dir=""
-logdir=logs/3d/ft/${model}_${roi_size}_${fold}_${epochs_3d}ep
+logdir=logs/3d/yw/${model}_${roi_size}_${fold}_${epochs_3d}ep_rndcrop
 
 train_3d:
 	NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE} PYTHONPATH=. \
-	python -u -m torch.distributed.launch --nproc_per_node=4 --master_port 2106 scripts/main_3d.py \
+	python -u -m torch.distributed.launch --nproc_per_node=4 --master_port 2106 scripts/main_3d_yw.py \
     --feature_size=32 \
     --batch_size=1 \
     --roi_x ${roi_size} \
@@ -56,28 +57,3 @@ train_3d:
 	--resume ${resume} \
 	--lr ${lr} \
 	--use_fp16 True
-
-
-
-train_3d_%:
-	NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE} PYTHONPATH=. \
-	python -u -m torch.distributed.launch --nproc_per_node=4 --master_port 2106 scripts/main_3d.py \
-    --feature_size=32 \
-    --batch_size=1 \
-    --roi_x $@ \
-    --roi_y $@ \
-    --roi_z 64 \
-    --space_x ${space} \
-    --space_y ${space} \
-    --space_z ${space} \
-    --model_name ${model} \
-    --fold ${fold} \
-    --out_channels 3 \
-	--num_samples ${num_samples} \
-    --infer_overlap=0.5 \
-    --data_dir=data/nii-data-2 \
-	--output_dir ${logdir} \
-	--batch_size_per_gpu ${batch_size_3d} \
-	--epochs ${epochs_3d} \
-	--res_block \
-	--use_fp16 False	

@@ -40,4 +40,30 @@ def iou_coef(y_true, y_pred, thr=0.5, dim=(2, 3), epsilon=0.001):
 
 
 def criterion_2d(y_pred, y_true):
-    return 0.25*BCELoss(y_pred, y_true) + 0.25*TverskyLoss(y_pred, y_true) + 0.5 * poly1_focal_loss(y_pred, y_true)
+    return 0.25*DiceLoss(y_pred, y_true) + 0.25*TverskyLoss(y_pred, y_true) + 0.5 * poly1_focal_loss(y_pred, y_true)
+
+
+from torch.nn.modules.loss import _Loss
+from monai.utils import LossReduction
+import segmentation_models_pytorch as smp
+
+
+class DiceBceLoss(_Loss):
+    def __init__(
+        self,
+        w_dice = 0.5,
+        w_bce = 0.5,
+        finetune_lb = -1,
+        reduction = LossReduction.MEAN,
+    ):
+        super().__init__(reduction=LossReduction(reduction).value)
+        self.w_dice = w_dice
+        self.w_bce = w_bce
+        self.dice_loss = smp.losses.DiceLoss(mode='multilabel')
+        self.bce_loss = smp.losses.SoftBCEWithLogitsLoss(smooth_factor=0.01)
+
+    def forward(self, pred, label):
+        return self.dice_loss(
+            torch.softmax(pred, 1)[:, 1:], label) * self.w_dice + self.bce_loss(pred[:, 1:], label) * self.w_bce
+
+

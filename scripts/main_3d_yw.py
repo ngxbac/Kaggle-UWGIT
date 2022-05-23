@@ -334,15 +334,54 @@ def get_model(args):
     return model
 
 
+from torch.nn.modules.loss import _Loss
+from monai.utils import LossReduction
+import segmentation_models_pytorch as smp
+
+class DiceBceLoss(_Loss):
+    def __init__(
+        self,
+        w_dice = 0.5,
+        w_bce = 0.5,
+        finetune_lb = -1,
+        reduction = LossReduction.MEAN,
+    ):
+        super().__init__(reduction=LossReduction(reduction).value)
+        self.w_dice = w_dice
+        self.w_bce = w_bce
+        self.finetune_lb = finetune_lb
+        if self.finetune_lb != -1:
+            self.dice_loss = DiceLoss(
+                sigmoid=True,
+                smooth_nr=0.01,
+                smooth_dr=0.01,
+                include_background=True,
+                batch=True,
+                squared_pred=True
+            )
+        else:
+            self.dice_loss = DiceLoss(
+                smooth_nr=0.01,
+                smooth_dr=0.01,
+                include_background=True,
+                batch=True,
+                squared_pred=True
+            )
+            self.bce_loss = smp.losses.SoftBCEWithLogitsLoss(smooth_factor=0.01)
+
+    def forward(self, pred, label):
+        # optimize single label
+        if self.finetune_lb != -1:
+            pred = pred[:, self.finetune_lb+1: self.finetune_lb + 2, ...]
+            label = label[:, self.finetune_lb: self.finetune_lb + 1, ...]
+            loss = self.dice_loss(pred, label) * self.w_dice + self.bce_loss(pred, label) * self.w_bce
+            return loss
+
+        return self.dice_loss(
+            torch.softmax(pred, 1)[:, 1:], label) * self.w_dice + self.bce_loss(pred[:, 1:], label) * self.w_bce
+
+
 def train(args):
-    # if args.multilabel:
-    #     args.out_channels = 3
-    # else:
-    #     args.out_channels = 4
-
-    # if not args.multilabel:
-    #     args.lr = args.lr / 10
-
     utils.init_distributed_mode(args)
     utils.fix_random_seeds(args.seed)
     print("git:\n  {}\n".format(utils.get_sha()))
@@ -351,29 +390,12 @@ def train(args):
     cudnn.benchmark = True
 
     # ============ preparing data ... ============
-    if 'ywdata' in args.data_dir:
-        train_loader, valid_loader = get_loader_yw(args)
-    else:
-        train_loader, valid_loader = get_loader(args)
+    train_loader, valid_loader = get_loader_yw(args)
     # ============ building Clusformer ... ============
     model = get_model(args)
 
     # ============ preparing loss ... ============
-    if args.multilabel:
-        criterion = DiceFocalLoss(to_onehot_y=False,
-                                  sigmoid=True,
-                                  squared_pred=False,
-                                  smooth_nr=args.smooth_nr,
-                                  smooth_dr=args.smooth_dr)
-    else:
-        criterion = DiceCELoss(
-            to_onehot_y=True,
-            softmax=True,
-            squared_pred=True,
-            smooth_nr=args.smooth_nr,
-            smooth_dr=args.smooth_dr
-        )
-
+    criterion = DiceBceLoss()
     # ============ preparing optimizer ... ============
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr,
                                   weight_decay=args.weight_decay)
@@ -490,7 +512,7 @@ def train_one_epoch(model, criterion, data_loader, optimizer, scheduler, epoch, 
     for batch in metric_logger.log_every(data_loader, 50, header):
         # move images to gpu
         images = batch['image'].cuda(non_blocking=True)
-        targets = batch['label'].cuda(non_blocking=True)
+        targets = batch['mask'].cuda(non_blocking=True)
 
         with torch.cuda.amp.autocast(fp16_scaler is not None):
             if not is_train:
@@ -536,25 +558,10 @@ def valid_one_epoch(model, data_loader, epoch, fp16_scaler, args):
 
     # Functions for post evaluation
 
-    if args.multilabel:
-        def post_label(x):
-            return x
+    post_label = lambda x: x
+    post_pred = AsDiscrete(argmax=True, to_onehot=args.out_channels)
 
-        post_pred = Compose(
-            [EnsureType(), Activations(sigmoid=True), AsDiscrete(threshold=0.5)]
-        )
-
-    else:
-
-        post_label = AsDiscrete(to_onehot=True,
-                                n_classes=args.out_channels)
-        post_pred = AsDiscrete(argmax=True,
-                               to_onehot=True,
-                               n_classes=args.out_channels)
-
-    metric_fn = DiceMetric(include_background=True,
-                       reduction=MetricReduction.MEAN,
-                       get_not_nans=True)
+    metric_fn = DiceMetric(reduction='mean')
 
     model_inferer = partial(sliding_window_inference,
                             roi_size=inf_size,
@@ -569,7 +576,7 @@ def valid_one_epoch(model, data_loader, epoch, fp16_scaler, args):
 
         # move images to gpu
         images = batch['image'].cuda(non_blocking=True)
-        targets = batch['label'].cuda(non_blocking=True)
+        targets = batch['mask'].cuda(non_blocking=True)
 
         with torch.cuda.amp.autocast(fp16_scaler is not None):
             with torch.no_grad():
@@ -579,8 +586,7 @@ def valid_one_epoch(model, data_loader, epoch, fp16_scaler, args):
             val_labels_convert = [post_label(
                 val_label_tensor) for val_label_tensor in val_labels_list]
             val_outputs_list = decollate_batch(logits)
-            val_output_convert = [post_pred(val_pred_tensor)
-                                  for val_pred_tensor in val_outputs_list]
+            val_output_convert = [post_pred(val_pred_tensor)[1:] for val_pred_tensor in val_outputs_list]
             acc = metric_fn(y_pred=val_output_convert, y=val_labels_convert)
             acc = acc.mean()
 

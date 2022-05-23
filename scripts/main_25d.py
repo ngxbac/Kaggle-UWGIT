@@ -16,7 +16,7 @@ from utils import dino as utils
 import timm
 from datasets.uw_gi import UWGI, get_transform
 import segmentation_models_pytorch as smp
-from criterions.segmentation import criterion_2d, dice_coef, iou_coef
+from criterions.segmentation import criterion_2d, dice_coef, iou_coef, DiceBceLoss
 
 
 def get_args_parser():
@@ -371,8 +371,6 @@ def valid_one_epoch(model, criterion, data_loader, optimizer, scheduler, epoch, 
             metric_dict = metric_fn(logits, targets)
 
             logits = logits.sigmoid() > 0.5
-            # logits = logits.d
-            # targets = targets.detach().cpu().numpy()
 
         bs = images.shape[0]
         for i in range(bs):

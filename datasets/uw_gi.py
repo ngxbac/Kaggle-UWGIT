@@ -38,7 +38,7 @@ class UWGI(torch.utils.data.Dataset):
         else:
             df = df[df.fold == fold]
 
-        case_ids = df['case'].values
+        case_ids = df['case'].unique()
         self.images = []
         for case_id in case_ids:
             images = glob.glob(f"{data_dir}/{case_id}/*/*_image.npy")

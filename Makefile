@@ -13,7 +13,7 @@ output_dir=./logs/25D_multi/${fold}/Unet/${backbone}_is${input_size}_bs${batch_s
 
 train:
 	PYTHONPATH=. \
-	python -u -m torch.distributed.launch --nproc_per_node=4 --master_port 2106 scripts/main_25d.py \
+	python -u -m torch.distributed.launch --nproc_per_node=8 --master_port 2106 scripts/main_25d.py \
 	--csv train_valid_case.csv \
 	--fold ${fold} \
 	--num_classes 3 \

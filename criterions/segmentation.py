@@ -69,27 +69,27 @@ class ComboLoss(nn.Module):
         return loss / count
 
 
-from torch.nn.modules.loss import _Loss
-from monai.utils import LossReduction
-import segmentation_models_pytorch as smp
+# from torch.nn.modules.loss import _Loss
+# from monai.utils import LossReduction
+# import segmentation_models_pytorch as smp
 
 
-class DiceBceLoss(_Loss):
-    def __init__(
-        self,
-        w_dice = 0.5,
-        w_bce = 0.5,
-        finetune_lb = -1,
-        reduction = LossReduction.MEAN,
-    ):
-        super().__init__(reduction=LossReduction(reduction).value)
-        self.w_dice = w_dice
-        self.w_bce = w_bce
-        self.dice_loss = smp.losses.DiceLoss(mode='multilabel')
-        self.bce_loss = smp.losses.SoftBCEWithLogitsLoss(smooth_factor=0.01)
+# class DiceBceLoss(_Loss):
+#     def __init__(
+#         self,
+#         w_dice = 0.5,
+#         w_bce = 0.5,
+#         finetune_lb = -1,
+#         reduction = LossReduction.MEAN,
+#     ):
+#         super().__init__(reduction=LossReduction(reduction).value)
+#         self.w_dice = w_dice
+#         self.w_bce = w_bce
+#         self.dice_loss = smp.losses.DiceLoss(mode='multilabel')
+#         self.bce_loss = smp.losses.SoftBCEWithLogitsLoss(smooth_factor=0.01)
 
-    def forward(self, pred, label):
-        return self.dice_loss(
-            torch.softmax(pred, 1)[:, 1:], label) * self.w_dice + self.bce_loss(pred[:, 1:], label) * self.w_bce
+#     def forward(self, pred, label):
+#         return self.dice_loss(
+#             torch.softmax(pred, 1)[:, 1:], label) * self.w_dice + self.bce_loss(pred[:, 1:], label) * self.w_bce
 
 

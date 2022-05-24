@@ -149,11 +149,12 @@ def get_dataset(args, name='train'):
 
 
 def get_model(args, distributed=True):
-    model = vmodel.Unet(
+    model = smp.Unet(
         encoder_name=args.backbone,
-        encoder_weights='imagenet',
+        encoder_weights='noisy-student',
         classes=args.num_classes,
-        decoder_attention_type='cbam'
+        # center=True
+        # decoder_attention_type='cbam'
     )
 
     # model = VNet(

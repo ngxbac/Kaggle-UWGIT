@@ -31,25 +31,28 @@ def get_transform(dataset='train', image_sizes=[320, 384]):
 
 
 class UWGI(torch.utils.data.Dataset):
-    def __init__(self, data_dir, csv, fold=0, is_train=True, label=True, transforms=None):
+    def __init__(self, data_dir, csv, fold=0, multilabel=True, is_train=True, label=True, transforms=None):
         df = pd.read_csv(csv)
         if is_train:
             df = df[df.fold != fold]
         else:
             df = df[df.fold == fold]
 
-        case_ids = df['case'].unique()
-        self.images = []
-        for case_id in case_ids:
-            images = glob.glob(f"{data_dir}/{case_id}/*/*_image.npy")
-            self.images += images
+        # case_ids = df['case'].unique()
+        # self.images = []
+        # for case_id in case_ids:
+        #     images = glob.glob(f"{data_dir}/{case_id}/*/*_image.npy")
+        #     self.images += images
+        df['mask'] = df['mask'].apply(lambda x: f"{data_dir}/{x}".replace("_mask", "_image"))
+        self.images = df['mask'].values
         self.transforms = transforms
+        self.multilabel = multilabel
 
     def __len__(self):
         return len(self.images)
 
 
-    def get_mask(self, image):
+    def get_mask_multilabel(self, image):
         mask = image.replace('_image', '_mask')
         mask = np.load(mask)
         mask[mask !=0] = 1 # 3 x h x w
@@ -69,6 +72,13 @@ class UWGI(torch.utils.data.Dataset):
         mask = np.transpose(mask, (1, 2, 0))
         return mask
 
+    def get_mask_multiclass(self, image):
+        mask = image.replace('_image', '_mask')
+        mask = np.load(mask)
+        mask = mask.max(axis=0) # h x w
+        return mask
+
+
     def get_case_id(self, image_path):
         return image_path.split("/")[-3]
 
@@ -80,7 +90,11 @@ class UWGI(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         image_path = self.images[index]
-        mask = self.get_mask(image_path)
+        if self.multilabel:
+            mask = self.get_mask_multilabel(image_path)
+        else:
+            mask = self.get_mask_multiclass(image_path)
+
         image = np.load(image_path)
         image = image / image.max()
 
@@ -90,7 +104,11 @@ class UWGI(torch.utils.data.Dataset):
 
         mask = mask.astype(np.float32)
         image = np.transpose(image, (2, 0, 1)).astype(np.float32)
-        mask = np.transpose(mask, (2, 0, 1)).astype(np.float32)
+
+        if self.multilabel:
+            mask = np.transpose(mask, (2, 0, 1)).astype(np.float32)
+        else:
+            mask = mask.astype(np.int)
 
         case_id = self.get_case_id(image_path)
         day = self.get_day(image_path)

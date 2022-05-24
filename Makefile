@@ -9,14 +9,17 @@ resume=''
 loss_weights=''
 scheduler='cosine'
 lr=1e-3
+num_classes=3
+multilabel=False
 output_dir=./logs/25D_multi/${fold}/VNet/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
 
 train:
 	PYTHONPATH=. \
 	python -u -m torch.distributed.launch --nproc_per_node=8 --master_port 2106 scripts/main_25d.py \
-	--csv train_valid_case.csv \
+	--csv train_valid_case_clean.csv \
 	--fold ${fold} \
-	--num_classes 3 \
+	--multilabel ${multilabel} \
+	--num_classes ${num_classes} \
 	--backbone ${backbone} \
 	--output_dir ${output_dir} \
 	--batch_size_per_gpu ${batch_size} \

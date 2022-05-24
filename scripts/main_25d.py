@@ -33,6 +33,7 @@ def get_args_parser():
     parser.add_argument('--num_classes', default=3, type=int)
     parser.add_argument('--backbone', default='resnet34', type=str)
     parser.add_argument('--loss_weights', type=str, default='1,0,0')
+    parser.add_argument('--multilabel', type=utils.bool_flag, default=False)
 
     # Training/Optimization parameters
     parser.add_argument('--use_fp16', type=utils.bool_flag, default=True, help="""Whether or not
@@ -80,21 +81,49 @@ class Criterion(nn.Module):
 
 
 class Metric:
-    def __init__(self, num_classes=117):
-        self.num_classes = num_classes
+    def __init__(self, multilabel=True):
+        self.multilabel = multilabel
 
-    def __call__(self, logits, targets):
+    def multilabel_metric(self, logits, targets):
         preds = logits.sigmoid()
         val_dice = dice_coef(targets, preds)
-        val_jaccard = iou_coef(targets, preds)
 
         metric_dict = {
             'dice': val_dice,
-            'iou': val_jaccard
         }
 
         return metric_dict
 
+    def measure_dice(self, y_pred, y_true, dim=(1,2), epsilon=1e-8):
+        inter = (y_true*y_pred).sum(dim=dim)
+        den = y_true.sum(dim=dim) + y_pred.sum(dim=dim)
+        dice = ((2*inter+epsilon)/(den+epsilon)).mean()
+        return dice
+
+    def multiclass_metric(self, logits, targets):
+        # logits: B x C x H x W
+        # targets: B x H x W
+        num_classes = logits.shape[1]
+        preds = logits.argmax(dim=1)  # B x H x W
+
+        all_dices = []
+        for i in range(num_classes):
+            pred_cls = preds == i
+            target_cls = targets == i
+            dice_cls = self.measure_dice(pred_cls, target_cls)
+            all_dices.append(dice_cls.item())
+
+        metric_dict = {
+            'dice': np.mean(all_dices)
+        }
+
+        return metric_dict
+
+    def __call__(self, logits, targets):
+        if self.multilabel:
+            return self.multilabel_metric(logits, targets)
+        else:
+            return self.multiclass_metric(logits, targets)
 
 def get_dataset(args, name='train'):
     image_sizes = [int(x) for x in args.input_size.split(",")]
@@ -106,6 +135,7 @@ def get_dataset(args, name='train'):
             csv=args.csv,
             data_dir=args.data_dir,
             is_train=True,
+            multilabel=args.multilabel,
             fold=args.fold,
             transforms=train_transform
         )
@@ -128,6 +158,7 @@ def get_dataset(args, name='train'):
             csv=args.csv,
             data_dir=args.data_dir,
             is_train=False,
+            multilabel=args.multilabel,
             fold=args.fold,
             transforms=valid_transform
         )
@@ -195,7 +226,12 @@ def train(args):
     # ============ preparing loss ... ============
     loss_weights = args.loss_weights
     loss_weights = [int(x) for x in loss_weights.split(",")]
-    criterion = ComboLoss(loss_weights[0], loss_weights[1], loss_weights[2])
+    criterion = ComboLoss(
+        args.multilabel,
+        loss_weights[0],
+        loss_weights[1],
+        loss_weights[2]
+    )
 
     # ============ preparing optimizer ... ============
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr,
@@ -299,7 +335,7 @@ def train(args):
 
 
 def train_one_epoch(model, criterion, data_loader, optimizer, scheduler, epoch, fp16_scaler, is_train, args):
-    metric_fn = Metric(num_classes=args.num_classes)
+    metric_fn = Metric(multilabel=args.multilabel)
     if is_train:
         model.train()
         prefix = 'TRAIN'
@@ -343,7 +379,7 @@ def train_one_epoch(model, criterion, data_loader, optimizer, scheduler, epoch, 
         torch.cuda.synchronize()
         metric_logger.update(loss=loss.item())
         metric_logger.update(dice=metric_dict['dice'])
-        metric_logger.update(iou=metric_dict['iou'])
+        # metric_logger.update(iou=metric_dict['iou'])
         # for k, v in metric_dict.items():
         #     metric_logger.update(**{k: v})
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
@@ -358,7 +394,7 @@ def valid_one_epoch(model, criterion, data_loader, optimizer, scheduler, epoch, 
     from monai.metrics import DiceMetric, HausdorffDistanceMetric
     from monai.utils.enums import MetricReduction
     from utils.comm import all_gather
-    metric_fn = Metric(num_classes=args.num_classes)
+    metric_fn = Metric(multilabel=args.multilabel)
 
     dice_fn = DiceMetric(include_background=True,
                        reduction=MetricReduction.MEAN,
@@ -416,7 +452,7 @@ def valid_one_epoch(model, criterion, data_loader, optimizer, scheduler, epoch, 
         torch.cuda.synchronize()
         metric_logger.update(loss=loss.item())
         metric_logger.update(dice=metric_dict['dice'])
-        metric_logger.update(iou=metric_dict['iou'])
+        # metric_logger.update(iou=metric_dict['iou'])
         # for k, v in metric_dict.items():
         #     metric_logger.update(**{k: v})
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])

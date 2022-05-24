@@ -9,7 +9,7 @@ resume=''
 loss_weights=''
 scheduler='cosine'
 lr=1e-3
-output_dir=./logs/25D_multi/${fold}/Unet/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
+output_dir=./logs/25D_multi/${fold}/VNet/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
 
 train:
 	PYTHONPATH=. \

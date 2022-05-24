@@ -53,6 +53,19 @@ class UWGI(torch.utils.data.Dataset):
         mask = image.replace('_image', '_mask')
         mask = np.load(mask)
         mask[mask !=0] = 1 # 3 x h x w
+        # 0: large bowel
+        # 1: small bowel
+        # 2: stomach
+
+        # Override large bowel to small bowel
+        # large_bowel = mask[0] # h x w
+        # large_bowel_idx = large_bowel == 1
+
+        # small_bowel = mask[1]  # h x w
+        # small_bowel[large_bowel_idx] = 0
+
+        # mask[1, ...] = small_bowel
+
         mask = np.transpose(mask, (1, 2, 0))
         return mask
 

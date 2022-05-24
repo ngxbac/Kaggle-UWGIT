@@ -17,6 +17,7 @@ import timm
 from datasets.uw_gi import UWGI, get_transform
 import segmentation_models_pytorch as smp
 from criterions.segmentation import criterion_2d, dice_coef, iou_coef, ComboLoss
+from models.vnet import model as vmodel
 
 
 def get_args_parser():
@@ -148,11 +149,20 @@ def get_dataset(args, name='train'):
 
 
 def get_model(args, distributed=True):
-    model = smp.Unet(
+    model = vmodel.Unet(
         encoder_name=args.backbone,
         encoder_weights='imagenet',
-        classes=args.num_classes
+        classes=args.num_classes,
+        decoder_attention_type='cbam'
     )
+
+    # model = VNet(
+    #     encoder_name=args.backbone,
+    #     encoder_weights='imagenet',
+    #     classes=args.num_classes,
+    #     attention_type='cbam'
+    # )
+
     # move networks to gpu
     model = model.cuda()
     # synchronize batch norms (if any)

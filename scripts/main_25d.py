@@ -260,6 +260,11 @@ def train(args):
             #os.path.join(args.output_dir, "checkpoint.pth"),
             args.resume,
             model=model,
+    	    run_variables=to_restore,
+            optimizer=optimizer,
+            fp16_scaler=fp16_scaler,
+            scheduler=scheduler,
+            criterion=criterion
         )
 
 

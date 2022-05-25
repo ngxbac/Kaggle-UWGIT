@@ -156,7 +156,9 @@ class ComboLoss(nn.Module):
         mode = 'multilabel' if multilabel else 'multiclass'
         self.dice_loss_fn = smp.losses.DiceLoss(mode=mode)
         self.tvk_loss_fn = smp.losses.TverskyLoss(mode=mode)
-        self.poly_loss_fn = PolyBCELoss() if multilabel else PolyLoss()
+        self.poly_loss_fn = PolyBCELoss() if multilabel else PolyLoss(
+            ce_weight = torch.FloatTensor([0.1, 0.2, 0.3, 0.3]).cuda()
+        )
 
     def forward(self, y_pred, y_true):
         loss = 0

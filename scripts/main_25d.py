@@ -34,6 +34,7 @@ def get_args_parser():
     parser.add_argument('--backbone', default='resnet34', type=str)
     parser.add_argument('--loss_weights', type=str, default='1,0,0')
     parser.add_argument('--multilabel', type=utils.bool_flag, default=False)
+    parser.add_argument('--ema_decay', default=0.993, type=float)
 
     # Training/Optimization parameters
     parser.add_argument('--use_fp16', type=utils.bool_flag, default=True, help="""Whether or not
@@ -180,23 +181,27 @@ def get_dataset(args, name='train'):
 
 
 def get_model(args, distributed=True):
-    model = smp.Unet(
+    # model = smp.Unet(
+    #     encoder_name=args.backbone,
+    #     encoder_weights='noisy-student',
+    #     classes=args.num_classes,
+    #     in_channels=3
+    #     # center=True
+    #     # decoder_attention_type='cbam'
+    # )
+
+    model = smp.FPN(
         encoder_name=args.backbone,
         encoder_weights='noisy-student',
         classes=args.num_classes,
+        in_channels=3
         # center=True
         # decoder_attention_type='cbam'
     )
 
-    # model = VNet(
-    #     encoder_name=args.backbone,
-    #     encoder_weights='imagenet',
-    #     classes=args.num_classes,
-    #     attention_type='cbam'
-    # )
-
     # move networks to gpu
     model = model.cuda()
+    model_ema = timm.utils.ModelEmaV2(model, decay=args.ema_decay)
     # synchronize batch norms (if any)
     if distributed:
         if utils.has_batchnorms(model):
@@ -205,7 +210,7 @@ def get_model(args, distributed=True):
         model = nn.parallel.DistributedDataParallel(
             model, device_ids=[args.gpu], find_unused_parameters=True)
 
-    return model
+    return model, model_ema
 
 
 def train(args):
@@ -221,7 +226,7 @@ def train(args):
     valid_loader = get_dataset(args, name='valid')
 
     # ============ building Clusformer ... ============
-    model = get_model(args)
+    model, model_ema = get_model(args)
 
     # ============ preparing loss ... ============
     loss_weights = args.loss_weights
@@ -279,19 +284,24 @@ def train(args):
         train_loader.sampler.set_epoch(epoch)
 
         # ============ training one epoch ... ============
-        train_stats = train_one_epoch(model, criterion,
+        train_stats = train_one_epoch(model, model_ema, criterion,
                                       train_loader, optimizer, scheduler, epoch, fp16_scaler, True, args)
 
         # Distributed bn
         timm.utils.distribute_bn(
             model, torch.distributed.get_world_size(), True)
 
+        timm.utils.distribute_bn(
+            model_ema, torch.distributed.get_world_size(), True)
+
         # ============ validate one epoch ... ============
-        valid_stats = train_one_epoch(model, criterion,
+        valid_stats = train_one_epoch(model, None, criterion,
                                       valid_loader, optimizer, scheduler, epoch, fp16_scaler, False, args)
 
+        ema_valid_stats = train_one_epoch(model_ema.module, None, criterion,
+                                      valid_loader, optimizer, scheduler, epoch, fp16_scaler, False, args)
 
-        current_score = valid_stats['dice']
+        current_score = max(valid_stats['dice'], ema_valid_stats['dice'])
         if scheduler.__class__.__name__ == 'ReduceLROnPlateau':
             scheduler.step(current_score)
         else:
@@ -308,6 +318,7 @@ def train(args):
         # ============ writing logs ... ============
         save_dict = {
             'model': model.state_dict(),
+            'ema': model_ema.state_dict(),
             'optimizer': optimizer.state_dict(),
             'scheduler': scheduler.state_dict(),
             'epoch': epoch + 1,
@@ -339,7 +350,18 @@ def train(args):
     print('Training time {}'.format(total_time_str))
 
 
-def train_one_epoch(model, criterion, data_loader, optimizer, scheduler, epoch, fp16_scaler, is_train, args):
+def train_one_epoch(
+        model,
+        model_ema,
+        criterion,
+        data_loader,
+        optimizer,
+        scheduler,
+        epoch,
+        fp16_scaler,
+        is_train,
+        args):
+
     metric_fn = Metric(multilabel=args.multilabel)
     if is_train:
         model.train()
@@ -379,12 +401,13 @@ def train_one_epoch(model, criterion, data_loader, optimizer, scheduler, epoch, 
                 fp16_scaler.step(optimizer)
                 fp16_scaler.update()
 
+            if model_ema is not None:
+                model_ema.update(model)
 
         # logging
         torch.cuda.synchronize()
         metric_logger.update(loss=loss.item())
         metric_logger.update(dice=metric_dict['dice'])
-        # metric_logger.update(iou=metric_dict['iou'])
         # for k, v in metric_dict.items():
         #     metric_logger.update(**{k: v})
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])

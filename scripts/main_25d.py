@@ -31,9 +31,11 @@ def get_args_parser():
     parser.add_argument('--input_size', default="320,384", type=str)
     parser.add_argument('--fold', default=0, type=int)
     parser.add_argument('--num_classes', default=3, type=int)
+    parser.add_argument('--model_name', default='FPN', type=str)
     parser.add_argument('--backbone', default='resnet34', type=str)
     parser.add_argument('--loss_weights', type=str, default='1,0,0')
     parser.add_argument('--multilabel', type=utils.bool_flag, default=False)
+    parser.add_argument('--use_ema', type=utils.bool_flag, default=False)
     parser.add_argument('--ema_decay', default=0.993, type=float)
 
     # Training/Optimization parameters
@@ -181,29 +183,20 @@ def get_dataset(args, name='train'):
 
 
 def get_model(args, distributed=True):
-    # model = smp.Unet(
-    #     encoder_name=args.backbone,
-    #     encoder_weights='noisy-student',
-    #     classes=args.num_classes,
-    #     in_channels=3
-    #     # center=True
-    #     # decoder_attention_type='cbam'
-    # )
-
-    model = smp.UnetPlusPlus(
+    model = smp.__dict__[args.model_name](
         encoder_name=args.backbone,
         encoder_weights='noisy-student',
         classes=args.num_classes,
         in_channels=3
-        # center=True
-        # decoder_attention_type='cbam'
     )
 
     # move networks to gpu
     model = model.cuda()
-    # model_ema = timm.utils.ModelEmaV2(model, decay=args.ema_decay)
+    if args.use_ema:
+        model_ema = timm.utils.ModelEmaV2(model, decay=args.ema_decay)
+    else:
+        model_ema = None
 
-    model_ema = None
     # synchronize batch norms (if any)
     if distributed:
         if utils.has_batchnorms(model):

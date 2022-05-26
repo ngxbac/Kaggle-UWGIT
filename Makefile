@@ -11,11 +11,11 @@ scheduler='cosine'
 lr=1e-3
 num_classes=3
 multilabel=False
-output_dir=./logs/25D_multi/${fold}/VNet/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
+output_dir=./logs/KFOLD/UnetPP/${fold}/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
 
 train:
 	PYTHONPATH=. \
-	python -u -m torch.distributed.launch --nproc_per_node=8 --master_port 2106 scripts/main_25d.py \
+	python -u -m torch.distributed.launch --nproc_per_node=4 --master_port 2106 scripts/main_25d.py \
 	--csv train_valid_case_clean_stra.csv \
 	--fold ${fold} \
 	--multilabel ${multilabel} \

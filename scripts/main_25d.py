@@ -190,7 +190,7 @@ def get_model(args, distributed=True):
     #     # decoder_attention_type='cbam'
     # )
 
-    model = smp.FPN(
+    model = smp.UnetPlusPlus(
         encoder_name=args.backbone,
         encoder_weights='noisy-student',
         classes=args.num_classes,
@@ -201,7 +201,9 @@ def get_model(args, distributed=True):
 
     # move networks to gpu
     model = model.cuda()
-    model_ema = timm.utils.ModelEmaV2(model, decay=args.ema_decay)
+    # model_ema = timm.utils.ModelEmaV2(model, decay=args.ema_decay)
+
+    model_ema = None
     # synchronize batch norms (if any)
     if distributed:
         if utils.has_batchnorms(model):
@@ -291,17 +293,21 @@ def train(args):
         timm.utils.distribute_bn(
             model, torch.distributed.get_world_size(), True)
 
-        timm.utils.distribute_bn(
-            model_ema, torch.distributed.get_world_size(), True)
 
         # ============ validate one epoch ... ============
         valid_stats = train_one_epoch(model, None, criterion,
                                       valid_loader, optimizer, scheduler, epoch, fp16_scaler, False, args)
 
-        ema_valid_stats = train_one_epoch(model_ema.module, None, criterion,
-                                      valid_loader, optimizer, scheduler, epoch, fp16_scaler, False, args)
+        if model_ema is not None:
+            timm.utils.distribute_bn(
+                model_ema, torch.distributed.get_world_size(), True)
+            ema_valid_stats = train_one_epoch(model_ema.module, None, criterion,
+                                  valid_loader, optimizer, scheduler, epoch, fp16_scaler, False, args)
 
-        current_score = max(valid_stats['dice'], ema_valid_stats['dice'])
+            current_score = max(valid_stats['dice'], ema_valid_stats['dice'])
+        else:
+            current_score = valid_stats['dice']
+
         if scheduler.__class__.__name__ == 'ReduceLROnPlateau':
             scheduler.step(current_score)
         else:
@@ -318,7 +324,7 @@ def train(args):
         # ============ writing logs ... ============
         save_dict = {
             'model': model.state_dict(),
-            'ema': model_ema.state_dict(),
+            # 'ema': model_ema.state_dict(),
             'optimizer': optimizer.state_dict(),
             'scheduler': scheduler.state_dict(),
             'epoch': epoch + 1,

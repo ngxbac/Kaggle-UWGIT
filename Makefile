@@ -11,7 +11,8 @@ scheduler='cosine'
 lr=1e-3
 num_classes=3
 multilabel=False
-output_dir=./logs/25D_multi/${fold}/VNet/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
+model_name=''
+output_dir=./logs/25D/${model_name}/${fold}/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
 
 train:
 	PYTHONPATH=. \
@@ -20,6 +21,7 @@ train:
 	--fold ${fold} \
 	--multilabel ${multilabel} \
 	--num_classes ${num_classes} \
+	--model_name ${model_name} \
 	--backbone ${backbone} \
 	--output_dir ${output_dir} \
 	--batch_size_per_gpu ${batch_size} \

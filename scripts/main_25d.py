@@ -31,6 +31,7 @@ def get_args_parser():
     parser.add_argument('--input_size', default="320,384", type=str)
     parser.add_argument('--fold', default=0, type=int)
     parser.add_argument('--num_classes', default=3, type=int)
+    parser.add_argument('--model_name', default='FPN', type=str)
     parser.add_argument('--backbone', default='resnet34', type=str)
     parser.add_argument('--loss_weights', type=str, default='1,0,0')
     parser.add_argument('--multilabel', type=utils.bool_flag, default=False)
@@ -180,7 +181,7 @@ def get_dataset(args, name='train'):
 
 
 def get_model(args, distributed=True):
-    model = smp.Unet(
+    model = smp.__dict__[args.model_name](
         encoder_name=args.backbone,
         encoder_weights='noisy-student',
         classes=args.num_classes,

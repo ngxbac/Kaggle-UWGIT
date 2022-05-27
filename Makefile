@@ -12,7 +12,11 @@ lr=1e-3
 num_classes=3
 multilabel=False
 model_name=''
-output_dir=./logs/25D/${model_name}/${fold}/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
+dataset='uw-gi'
+data_dir='data/uw-gi-25d/'
+pretrained=True
+pretrained_checkpoint=''
+output_dir=./logs//${model_name}/${fold}/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
 
 train:
 	PYTHONPATH=. \
@@ -20,6 +24,8 @@ train:
 	--csv train_valid_case_clean.csv \
 	--fold ${fold} \
 	--multilabel ${multilabel} \
+	--data_dir ${data_dir} \
+	--dataset ${dataset} \
 	--num_classes ${num_classes} \
 	--model_name ${model_name} \
 	--backbone ${backbone} \
@@ -28,6 +34,8 @@ train:
 	--input_size ${input_size} \
 	--epochs ${epochs} \
 	--resume ${resume} \
+	--pretrained ${pretrained} \
+	--pretrained_checkpoint ${pretrained_checkpoint} \
 	--lr ${lr} \
 	--loss_weights ${loss_weights} \
 	--scheduler ${scheduler} \

@@ -15,6 +15,7 @@ import cv2
 from utils import dino as utils
 import timm
 from datasets.uw_gi import UWGI, get_transform
+from datasets.abdomen import Abdomen
 import segmentation_models_pytorch as smp
 from criterions.segmentation import criterion_2d, dice_coef, iou_coef, ComboLoss
 from models.vnet import model as vmodel
@@ -34,7 +35,10 @@ def get_args_parser():
     parser.add_argument('--model_name', default='FPN', type=str)
     parser.add_argument('--backbone', default='resnet34', type=str)
     parser.add_argument('--loss_weights', type=str, default='1,0,0')
+    parser.add_argument('--pretrained_checkpoint', type=str, default='')
     parser.add_argument('--multilabel', type=utils.bool_flag, default=False)
+    parser.add_argument('--pretrained', type=utils.bool_flag, default=True)
+    parser.add_argument('--dataset', default="uw-gi", type=str)
 
     # Training/Optimization parameters
     parser.add_argument('--use_fp16', type=utils.bool_flag, default=True, help="""Whether or not
@@ -126,7 +130,30 @@ class Metric:
         else:
             return self.multiclass_metric(logits, targets)
 
-def get_dataset(args, name='train'):
+
+def get_abdomen_dataset(args):
+    image_sizes = [int(x) for x in args.input_size.split(",")]
+    train_transform = get_transform('train', image_sizes)
+    train_dataset = Abdomen(
+        data_dir=args.data_dir,
+        transforms=train_transform
+    )
+
+    train_sampler = torch.utils.data.DistributedSampler(
+        train_dataset, shuffle=True)
+    train_data_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        sampler=train_sampler,
+        batch_size=args.batch_size_per_gpu,
+        num_workers=args.num_workers,
+        pin_memory=True,
+        drop_last=True,
+    )
+    print(f"Train data loaded: there are {len(train_dataset)} images.")
+    return train_data_loader
+
+
+def get_uw_gi_dataset(args, name='train'):
     image_sizes = [int(x) for x in args.input_size.split(",")]
     train_transform = get_transform('train', image_sizes)
     valid_transform = get_transform('valid', image_sizes)
@@ -180,21 +207,35 @@ def get_dataset(args, name='train'):
         raise ("There is no dataset: ", name)
 
 
+def get_dataset(args, name='train'):
+    if args.dataset == 'uw-gi':
+        return get_uw_gi_dataset(args, name)
+    elif args.dataset == 'abdomen':
+        return get_abdomen_dataset(args)
+
+
+def load_pretrained_checkpoint(model, path):
+    current_state_dict = model.state_dict()
+    checkpoint = torch.load(path, map_location='cpu')['model']
+    for k in current_state_dict.keys():
+        if current_state_dict[k].shape == checkpoint[k].shape:
+            current_state_dict[k] = checkpoint[k]
+        else:
+            print(f"{k} is not matched")
+
+    model.load_state_dict(current_state_dict)
+    print(f'[+] Loaded checkpoint: {path}')
+    return model
+
+
 def get_model(args, distributed=True):
     model = smp.__dict__[args.model_name](
         encoder_name=args.backbone,
-        encoder_weights='noisy-student',
+        encoder_weights='noisy-student' if args.pretrained else None,
         classes=args.num_classes,
         # center=True
         # decoder_attention_type='cbam'
     )
-
-    # model = VNet(
-    #     encoder_name=args.backbone,
-    #     encoder_weights='imagenet',
-    #     classes=args.num_classes,
-    #     attention_type='cbam'
-    # )
 
     # move networks to gpu
     model = model.cuda()
@@ -205,6 +246,9 @@ def get_model(args, distributed=True):
 
         model = nn.parallel.DistributedDataParallel(
             model, device_ids=[args.gpu], find_unused_parameters=True)
+
+    if os.path.isfile(args.pretrained_checkpoint):
+        model = load_pretrained_checkpoint(model, args.pretrained_checkpoint)
 
     return model
 
@@ -219,7 +263,10 @@ def train(args):
 
     # ============ preparing data ... ============
     train_loader = get_dataset(args, name='train')
-    valid_loader = get_dataset(args, name='valid')
+    if args.dataset == 'uw-gi':
+        valid_loader = get_dataset(args, name='valid')
+    else:
+        valid_loader = None
 
     # ============ building Clusformer ... ============
     model = get_model(args)
@@ -288,8 +335,11 @@ def train(args):
             model, torch.distributed.get_world_size(), True)
 
         # ============ validate one epoch ... ============
-        valid_stats = train_one_epoch(model, criterion,
-                                      valid_loader, optimizer, scheduler, epoch, fp16_scaler, False, args)
+        if valid_loader is not None:
+            valid_stats = train_one_epoch(model, criterion,
+                                          valid_loader, optimizer, scheduler, epoch, fp16_scaler, False, args)
+        else:
+            valid_stats = train_stats
 
 
         current_score = valid_stats['dice']

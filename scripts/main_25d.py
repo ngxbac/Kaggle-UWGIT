@@ -19,6 +19,8 @@ from datasets.abdomen import Abdomen
 import segmentation_models_pytorch as smp
 from criterions.segmentation import criterion_2d, dice_coef, iou_coef, ComboLoss
 from models.vnet import model as vmodel
+# from models.TransUNet.networks.vit_seg_modeling import VisionTransformer as ViT_seg
+# from models.TransUNet.networks.vit_seg_modeling import CONFIGS as CONFIGS_ViT_seg
 
 
 def get_args_parser():
@@ -38,9 +40,10 @@ def get_args_parser():
     parser.add_argument('--pretrained_checkpoint', type=str, default='')
     parser.add_argument('--multilabel', type=utils.bool_flag, default=False)
     parser.add_argument('--use_ema', type=utils.bool_flag, default=False)
-    parser.add_argument('--ema_decay', default=0.993, type=float)
+    parser.add_argument('--ema_decay', default=0.997, type=float)
     parser.add_argument('--pretrained', type=utils.bool_flag, default=True)
     parser.add_argument('--dataset', default="uw-gi", type=str)
+    parser.add_argument('--vit_patches_size', default=16, type=int)
 
     # Training/Optimization parameters
     parser.add_argument('--use_fp16', type=utils.bool_flag, default=True, help="""Whether or not
@@ -243,6 +246,16 @@ def get_model(args, distributed=True):
         in_channels=3
     )
 
+
+    # image_sizes = [int(x) for x in args.input_size.split(",")]
+    # config_vit = CONFIGS_ViT_seg[args.model_name]
+    # config_vit.n_classes = args.num_classes
+    # config_vit.n_skip = 3
+    # if args.model_name.find('R50') != -1:
+    #     config_vit.patches.grid = (int(image_sizes[0]/ args.vit_patches_size), int(image_sizes[0] / args.vit_patches_size))
+    # model = ViT_seg(config_vit, img_size=image_sizes[0], num_classes=config_vit.n_classes).cuda()
+    # model.load_from(weights=np.load(config_vit.pretrained_path))
+
     # move networks to gpu
     model = model.cuda()
     if args.use_ema:
@@ -298,7 +311,7 @@ def train(args):
 
     if args.scheduler == 'cosine':
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=args.epochs, eta_min=0)
+            optimizer, T_max=args.epochs * len(train_loader), eta_min=0)
     else:
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode='max', patience=2, factor=0.1
@@ -363,10 +376,10 @@ def train(args):
         else:
             current_score = valid_stats['dice']
 
-        if scheduler.__class__.__name__ == 'ReduceLROnPlateau':
-            scheduler.step(current_score)
-        else:
-            scheduler.step()
+        # if scheduler.__class__.__name__ == 'ReduceLROnPlateau':
+        #     scheduler.step(current_score)
+        # else:
+        #     scheduler.step()
 
         if current_score > best_score:
             best_score = current_score
@@ -464,6 +477,8 @@ def train_one_epoch(
 
             if model_ema is not None:
                 model_ema.update(model)
+
+            scheduler.step()
 
         # logging
         torch.cuda.synchronize()

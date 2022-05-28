@@ -402,6 +402,10 @@ def train(args):
             'criterion': criterion.state_dict(),
             'best_score': best_score
         }
+
+        if model_ema is not None:
+            save_dict['ema'] = model_ema.state_dict()
+
         if fp16_scaler is not None:
             save_dict['fp16_scaler'] = fp16_scaler.state_dict()
         utils.save_on_master(save_dict, os.path.join(

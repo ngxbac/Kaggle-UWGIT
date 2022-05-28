@@ -348,7 +348,7 @@ def train(args):
 
         # ============ validate one epoch ... ============
         if valid_loader is not None:
-            valid_stats = train_one_epoch(model, criterion,
+            valid_stats = train_one_epoch(model, None, criterion,
                                           valid_loader, optimizer, scheduler, epoch, fp16_scaler, False, args)
         else:
             valid_stats = train_stats

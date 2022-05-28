@@ -16,8 +16,8 @@
 
 for model_name in FPN ; do
     make    fold=0 \
-            prefix='hard_aug' \
-            loss_weights='1,1,1' \
+            prefix='hard_aug_dice' \
+            loss_weights='1,0,0' \
             scheduler='cosine' \
             backbone='timm-efficientnet-b5' \
             epochs=30 \
@@ -29,6 +29,6 @@ for model_name in FPN ; do
             data_dir='data/uw-gi-25d' \
             pretrained_checkpoint='' \
             model_name=${model_name} \
-            use_ema=False \
+            use_ema=True \
             train
 done

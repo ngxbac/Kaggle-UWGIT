@@ -38,7 +38,6 @@ train:
 	--epochs ${epochs} \
 	--resume ${resume} \
 	--pretrained ${pretrained} \
-	--pretrained_checkpoint ${pretrained_checkpoint} \
 	--lr ${lr} \
 	--loss_weights ${loss_weights} \
 	--scheduler ${scheduler} \

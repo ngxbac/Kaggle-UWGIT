@@ -16,7 +16,7 @@
 
 for model_name in FPN ; do
     make    fold=0 \
-            prefix='pretrained_abdomen' \
+            prefix='hard_aug' \
             loss_weights='1,1,1' \
             scheduler='cosine' \
             backbone='timm-efficientnet-b5' \
@@ -27,7 +27,7 @@ for model_name in FPN ; do
             pretrained=True \
             dataset='uw-gi' \
             data_dir='data/uw-gi-25d' \
-            pretrained_checkpoint='logs/pretrained_abdomen/FPN/0/timm-efficientnet-b5_is512,512_bs32_e15_abdomen/checkpoint.pth' \
+            pretrained_checkpoint='' \
             model_name=${model_name} \
             use_ema=False \
             train

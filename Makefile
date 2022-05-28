@@ -16,7 +16,7 @@ dataset='uw-gi'
 data_dir='data/uw-gi-25d/'
 pretrained=True
 pretrained_checkpoint=''
-output_dir=./logs//${model_name}/${fold}/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
+output_dir=./logs/${model_name}/${fold}/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
 
 train:
 	PYTHONPATH=. \

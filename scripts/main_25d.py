@@ -134,10 +134,15 @@ class Metric:
 def get_abdomen_dataset(args):
     image_sizes = [int(x) for x in args.input_size.split(",")]
     train_transform = get_transform('train', image_sizes)
-    train_dataset = Abdomen(
-        data_dir=args.data_dir,
+    data_dirs = args.data_dir
+    data_dirs = data_dirs.split(",")
+
+    train_dataset = [Abdomen(
+        data_dir=data_dir,
         transforms=train_transform
-    )
+    ) for data_dir in data_dirs]
+
+    train_dataset = torch.utils.data.ConcatDataset(train_dataset)
 
     train_sampler = torch.utils.data.DistributedSampler(
         train_dataset, shuffle=True)

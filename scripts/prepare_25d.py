@@ -17,22 +17,29 @@ def load_image_(data_dir, case_id, day, slice):
 
 def load_image(data_dir, case_id, day, slice, stride):
     slice_number = int(slice.split("_")[1])
-    prev_slice = slice_number - stride
-    prev_slice = str(prev_slice).zfill(4)
-    prev_slice = f"slice_{prev_slice}"
-    next_slice = slice_number + stride
-    next_slice = str(next_slice).zfill(4)
-    next_slice = f"slice_{next_slice}"
-
-    prev_image = load_image_(data_dir, case_id, day, prev_slice)
     cur_image = load_image_(data_dir, case_id, day, slice)
-    next_image = load_image_(data_dir, case_id, day, next_slice)
-
     assert cur_image is not None
-    prev_image = cur_image if prev_image is None else prev_image
-    next_image = cur_image if next_image is None else next_image
 
-    image = np.array([prev_image, cur_image, next_image]) # 3 x h x w
+    all_images = []
+    for i in range(stride, 0, -1):
+        prev_slice = slice_number - i
+        prev_slice = str(prev_slice).zfill(4)
+        prev_slice = f"slice_{prev_slice}"
+        prev_image = load_image_(data_dir, case_id, day, prev_slice)
+        prev_image = cur_image if prev_image is None else prev_image
+        all_images.append(prev_image)
+
+    all_images.append(cur_image)
+
+    for i in range(1, stride + 1):
+        next_slice = slice_number + i
+        next_slice = str(next_slice).zfill(4)
+        next_slice = f"slice_{next_slice}"
+        next_image = load_image_(data_dir, case_id, day, next_slice)
+        next_image = cur_image if next_image is None else next_image
+        all_images.append(next_image)
+
+    image = np.array(all_images) # 3 x h x w
     image = np.transpose(image, (1, 2, 0)) # h x w x 3
     return image
 
@@ -50,7 +57,7 @@ def rle_decode(rle, mask, fill=255):
 stride = 2
 
 data_dir = "data/uw-madison-gi-tract-image-segmentation"
-save_data_dir = "data/uw-gi-25d"
+save_data_dir = "data/uw-gi-25d-5"
 
 df = pd.read_csv(f"{data_dir}/train.csv")
 ids = df['id'].values

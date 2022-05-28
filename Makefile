@@ -13,7 +13,11 @@ num_classes=3
 use_ema=False
 model_name='FPN'
 multilabel=False
-output_dir=./logs/final/${model_name}/${fold}/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
+dataset='uw-gi'
+data_dir='data/uw-gi-25d/'
+pretrained=True
+pretrained_checkpoint=''
+output_dir=./logs/${model_name}/${fold}/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
 
 train:
 	PYTHONPATH=. \
@@ -23,13 +27,18 @@ train:
 	--use_ema ${use_ema} \
 	--model_name ${model_name} \
 	--multilabel ${multilabel} \
+	--data_dir ${data_dir} \
+	--dataset ${dataset} \
 	--num_classes ${num_classes} \
+	--model_name ${model_name} \
 	--backbone ${backbone} \
 	--output_dir ${output_dir} \
 	--batch_size_per_gpu ${batch_size} \
 	--input_size ${input_size} \
 	--epochs ${epochs} \
 	--resume ${resume} \
+	--pretrained ${pretrained} \
+	--pretrained_checkpoint ${pretrained_checkpoint} \
 	--lr ${lr} \
 	--loss_weights ${loss_weights} \
 	--scheduler ${scheduler} \

@@ -201,7 +201,7 @@ def get_uw_gi_dataset(args, name='train'):
             transforms=valid_transform
         )
 
-        valid_sampler = torch.utils.data.DistributedSampler(
+        valid_sampler = None if args.pred else torch.utils.data.DistributedSampler(
             valid_dataset, shuffle=False)
         valid_data_loader = torch.utils.data.DataLoader(
             valid_dataset,
@@ -209,7 +209,7 @@ def get_uw_gi_dataset(args, name='train'):
             batch_size=args.batch_size_per_gpu,
             num_workers=args.num_workers,
             pin_memory=True,
-            drop_last=True,
+            drop_last=False,
         )
         print(f"Valid data loaded: there are {len(valid_dataset)} images.")
         return valid_data_loader
@@ -270,6 +270,8 @@ def get_model(args, distributed=True):
 
         model = nn.parallel.DistributedDataParallel(
             model, device_ids=[args.gpu], find_unused_parameters=True)
+    else:
+        model = nn.DataParallel(model)
 
     if os.path.isfile(args.pretrained_checkpoint):
         model = load_pretrained_checkpoint(model, args.pretrained_checkpoint)
@@ -494,127 +496,42 @@ def train_one_epoch(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-def valid_one_epoch(model, criterion, data_loader, optimizer, scheduler, epoch, fp16_scaler, is_train, args):
-    from monai.metrics import DiceMetric, HausdorffDistanceMetric
-    from monai.utils.enums import MetricReduction
-    from utils.comm import all_gather
-    metric_fn = Metric(multilabel=args.multilabel)
+def predict(args):
+    print("git:\n  {}\n".format(utils.get_sha()))
+    print("\n".join("%s: %s" % (k, str(v))
+          for k, v in sorted(dict(vars(args)).items())))
+    cudnn.benchmark = True
 
-    dice_fn = DiceMetric(include_background=True,
-                       reduction=MetricReduction.MEAN,
-                       get_not_nans=True)
+    # ============ preparing data ... ============
+    if args.dataset == 'uw-gi':
+        valid_loader = get_dataset(args, name='valid')
+    else:
+        return
 
-    model.eval()
-    prefix = 'VALID'
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    header = 'Epoch: [{}/{}]'.format(epoch, args.epochs)
+    # ============ building Clusformer ... ============
+    model, model_ema = get_model(args, False)
+    model = model.eval()
 
-    meta = {}
-    for batch in metric_logger.log_every(data_loader, 50, header):
+    if os.path.isfile(args.resume):
+        utils.restart_from_checkpoint(
+            args.resume,
+            model=model,
+        )
+
+    all_preds = []
+
+    from tqdm import tqdm
+    for batch in tqdm(valid_loader, total=len(valid_loader)):
+        # move images to gpu
         images = batch['image'].cuda(non_blocking=True)
         targets = batch['target'].cuda(non_blocking=True)
-        cases = batch['case_id']
-        days = batch['day']
-        slices = batch['slice']
 
-        with torch.cuda.amp.autocast(fp16_scaler is not None):
-            if not is_train:
-                with torch.no_grad():
-                    logits = model(images)
-            else:
-                logits = model(images)
-            loss = criterion(logits, targets)
-            metric_dict = metric_fn(logits, targets)
+        with torch.no_grad():
+            logits = model(images)
+        all_preds.append(logits.detach().cpu())
 
-            logits = logits.sigmoid() > 0.5
-
-        bs = images.shape[0]
-        for i in range(bs):
-            pred = logits[i]
-            target = logits[i]
-            case = cases[i]
-            day = days[i]
-            slice = slices[i]
-
-            if not case in meta:
-                meta[case] = {}
-
-            if not day in meta[case]:
-                meta[case][day] = {}
-
-            meta[case][day][slice] = {
-                'gt': target,
-                'pred': pred
-            }
-
-        # print(len(meta))
-        # meta = all_gather(meta)
-        # print(meta)
-        # print("After ", len(meta))
-
-        # logging
-        torch.cuda.synchronize()
-        metric_logger.update(loss=loss.item())
-        metric_logger.update(dice=metric_dict['dice'])
-        # metric_logger.update(iou=metric_dict['iou'])
-        # for k, v in metric_dict.items():
-        #     metric_logger.update(**{k: v})
-        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
-        metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
-
-    # gather the stats from all processes
-    metric_logger.synchronize_between_processes()
-    print(f"[{prefix}] Averaged stats:", metric_logger)
-    ret_dict = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-
-    def get_max_slice(day_dict):
-        all_slice_number = []
-        for slice in day_dict.keys():
-            slice_number = int(slice.split(".")[0].split("_")[1])
-            all_slice_number.append(slice_number)
-
-        return max(all_slice_number)
-
-    if utils.is_main_process():
-        meta_list = all_gather(meta)
-        meta_gather = {}
-        for meta in meta_list:
-            for case_id in meta.keys():
-                if not case_id in meta_gather:
-                    meta_gather[case_id] = meta[case_id]
-                else:
-                    for day in meta[case_id].keys():
-                        if not day in meta_gather[case_id]:
-                            meta_gather[case_id][day] = meta[case_id][day]
-                        else:
-                            meta_gather[case_id][day].update(meta[case_id][day])
-
-        scores = []
-        for case_id in meta_gather.keys():
-            for day in meta_gather[case_id].keys():
-                max_slice = get_max_slice(meta_gather[case_id][day])
-
-                all_preds = []
-                all_gts = []
-                for i in range(1, max_slice+1):
-                    i = str(i).zfill(4)
-                    slice_key = f'slice_{i}_image.npy'
-                    all_preds.append(meta_gather[case_id][day][slice_key]['pred'])
-                    all_gts.append(meta_gather[case_id][day][slice_key]['gt'])
-
-                all_preds = torch.stack(all_preds)
-                all_gts = torch.stack(all_gts)
-
-                score = dice_fn(y_pred=[all_preds], y=[all_gts])
-                print(score)
-                scores.append(score)
-
-        mean_dice = np.mean(scores)
-        print(mean_dice)
-
-        ret_dict['dice_3d'] = mean_dice
-
-    return ret_dict
+    all_preds = np.concatenate(all_preds, axis=0)
+    np.save(f"logs/pred_{args.fold}.npy", all_preds)
 
 
 if __name__ == '__main__':

@@ -1,7 +1,7 @@
 fold=0
-backbone=efficientnet-b3
+backbone=timm-efficientnet-b5
 batch_size=32
-input_size=256,256
+input_size=512,512
 epochs=30
 NCCL_P2P_DISABLE=0
 prefix=''
@@ -9,14 +9,15 @@ resume=''
 loss_weights=''
 scheduler='cosine'
 lr=1e-3
-num_classes=3
+num_classes=4
 use_ema=False
 model_name='FPN'
 multilabel=False
 dataset='uw-gi'
-data_dir='data/uw-gi-25d/'
+data_dir='data/uw-gi-25d'
 pretrained=True
 pretrained_checkpoint=''
+pred=False
 output_dir=./logs/${model_name}/${fold}/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
 
 train:
@@ -41,7 +42,34 @@ train:
 	--lr ${lr} \
 	--loss_weights ${loss_weights} \
 	--scheduler ${scheduler} \
+	--pred ${pred} \
 	--use_fp16 True
+
+valid:
+	PYTHONPATH=. CUDA_VISIBLE_DEVICES=0 python scripts/main_25d.py \
+	--csv train_valid_case_clean.csv \
+	--fold ${fold} \
+	--use_ema ${use_ema} \
+	--model_name ${model_name} \
+	--multilabel ${multilabel} \
+	--data_dir ${data_dir} \
+	--dataset ${dataset} \
+	--num_classes ${num_classes} \
+	--model_name ${model_name} \
+	--backbone ${backbone} \
+	--output_dir ${output_dir} \
+	--batch_size_per_gpu ${batch_size} \
+	--input_size ${input_size} \
+	--epochs ${epochs} \
+	--resume ${resume} \
+	--pretrained ${pretrained} \
+	--lr ${lr} \
+	--loss_weights ${loss_weights} \
+	--scheduler ${scheduler} \
+	--pred ${pred} \
+	--use_fp16 True
+
+
 
 
 roi_size=64

@@ -43,6 +43,40 @@ def get_transform(dataset='train', image_sizes=[320, 384]):
     return data_transforms[dataset]
 
 
+def cut_edge(data, threshold=0.1, percent=0.5):
+    '''
+    function that cuts zero edge
+    '''
+    H, W = data.shape
+    H_s, H_e = 0, H - 1
+    W_s, W_e = 0, W - 1
+
+    while H_s < H:
+        if data[H_s, :].max() > threshold:
+            break
+        H_s += 1
+    while H_e > H_s:
+        if data[H_e, :].max() > threshold:
+            break
+        H_e -= 1
+    while W_s < W:
+        if data[:, W_s].max() > threshold:
+            break
+        W_s += 1
+    while W_e > W_s:
+        if data[:, W_e].max() > threshold:
+            break
+        W_e -= 1
+
+    delta_h = H_e - H_s
+    delta_w = W_e - W_s
+
+    if delta_h / H < percent or delta_w / W < percent:
+        return 0, H, 0, W
+
+    return int(H_s), int(H_e), int(W_s), int(W_e)
+
+
 class UWGI(torch.utils.data.Dataset):
     def __init__(self, data_dir, csv, fold=0, multilabel=True, is_train=True, label=True, transforms=None):
         df = pd.read_csv(csv)
@@ -101,6 +135,13 @@ class UWGI(torch.utils.data.Dataset):
     def get_slice(self, image_path):
         return image_path.split("/")[-1]
 
+    def crop_roi(self, image, mask):
+        channel = image[..., 1]
+        ymin, ymax, xmin, xmax = cut_edge(channel)
+        image = image[ymin:ymax, xmin:xmax]
+        mask = mask[ymin:ymax, xmin:xmax]
+        return image, mask
+
     def __getitem__(self, index):
         image_path = self.images[index]
         if self.multilabel:
@@ -110,6 +151,8 @@ class UWGI(torch.utils.data.Dataset):
 
         image = np.load(image_path)
         image = image / image.max()
+
+        image, mask = self.crop_roi(image, mask)
 
         ret = self.transforms(image=image, mask=mask)
         image = ret['image']

@@ -17,7 +17,7 @@
 for model_name in FPN ; do
     for fold in 0 1 2 3 4 ; do
         make    fold=${fold} \
-                prefix='stra_v2' \
+                prefix='stra_crop_roi' \
                 loss_weights='1,1,1' \
                 scheduler='cosine' \
                 backbone='timm-efficientnet-b5' \

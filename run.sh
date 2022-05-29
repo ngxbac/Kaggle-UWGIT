@@ -15,9 +15,9 @@
 
 
 for model_name in FPN ; do
-    for fold in 0 1 2 3 4 ; do
+    for fold in 1 ; do
         make    fold=${fold} \
-                prefix='stra_crop_roi' \
+                prefix='rnd_roi' \
                 loss_weights='1,1,1' \
                 scheduler='cosine' \
                 backbone='timm-efficientnet-b5' \
@@ -27,6 +27,7 @@ for model_name in FPN ; do
                 batch_size=32 \
                 pretrained=True \
                 dataset='uw-gi' \
+                resume='logs/FPN/1/timm-efficientnet-b5_is512,512_bs32_e30_rnd_roi/checkpoint.pth' \
                 data_dir='data/uw-gi-25d' \
                 pretrained_checkpoint='' \
                 model_name=${model_name} \

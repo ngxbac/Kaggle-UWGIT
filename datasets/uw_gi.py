@@ -9,8 +9,7 @@ import albumentations as A
 def get_transform(dataset='train', image_sizes=[320, 384]):
     data_transforms = {
         "train": A.Compose([
-            # A.Resize(image_sizes[0], image_sizes[1]),
-            A.RandomResizedCrop(image_sizes[0], image_sizes[1], p=1.0),
+            A.Resize(image_sizes[0], image_sizes[1]),
             A.HorizontalFlip(p=0.5),
             A.ShiftScaleRotate(shift_limit=0.0625,
                                scale_limit=0.05, rotate_limit=30, p=0.5),
@@ -19,24 +18,26 @@ def get_transform(dataset='train', image_sizes=[320, 384]):
                 A.ElasticTransform(alpha=1, sigma=50, alpha_affine=50, p=1.0)
             ], p=0.25),
 
-            # A.OneOf([
-            #     A.MotionBlur(p=.2),
-            #     A.MedianBlur(blur_limit=3, p=0.1),
-            #     A.Blur(blur_limit=3, p=0.1),
-            # ], p=0.25),
+            A.OneOf([
+                A.MotionBlur(p=.2),
+                A.MedianBlur(blur_limit=3, p=0.1),
+                A.Blur(blur_limit=3, p=0.1),
+            ], p=0.25),
 
             A.OneOf([
-                # A.CLAHE(clip_limit=2),
+                A.CLAHE(clip_limit=2),
                 A.IAASharpen(),
                 A.IAAEmboss(),
-                # A.RandomBrightnessContrast(),
+                A.RandomBrightnessContrast(),
             ], p=0.25),
 
             A.Cutout(num_holes=8, max_h_size=32, max_w_size=32, fill_value=0, p=0.25),
+            A.Normalize(),
         ], p=1.0),
 
         "valid": A.Compose([
             A.Resize(image_sizes[0], image_sizes[1]),
+            A.Normalize(),
         ], p=1.0)
     }
 
@@ -152,7 +153,11 @@ class UWGI(torch.utils.data.Dataset):
         image = np.load(image_path)
         image = image / image.max()
 
-        image, mask = self.crop_roi(image, mask)
+        if np.random.rand() < 0.5:
+            image, mask = self.crop_roi(image, mask)
+
+        image = image * 255
+        image = image.astype(np.uint8)
 
         ret = self.transforms(image=image, mask=mask)
         image = ret['image']

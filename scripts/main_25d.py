@@ -313,7 +313,7 @@ def train(args):
 
     if args.scheduler == 'cosine':
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=args.epochs * len(train_loader), eta_min=0)
+            optimizer, T_max=args.epochs, eta_min=0)
     else:
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode='max', patience=2, factor=0.1
@@ -378,10 +378,10 @@ def train(args):
         else:
             current_score = valid_stats['dice']
 
-        # if scheduler.__class__.__name__ == 'ReduceLROnPlateau':
-        #     scheduler.step(current_score)
-        # else:
-        #     scheduler.step()
+        if scheduler.__class__.__name__ == 'ReduceLROnPlateau':
+            scheduler.step(current_score)
+        else:
+            scheduler.step()
 
         if current_score > best_score:
             best_score = current_score
@@ -484,7 +484,7 @@ def train_one_epoch(
             if model_ema is not None:
                 model_ema.update(model)
 
-            scheduler.step()
+            # scheduler.step()
 
         # logging
         torch.cuda.synchronize()

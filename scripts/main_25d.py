@@ -239,12 +239,20 @@ def load_pretrained_checkpoint(model, path):
 
 
 def get_model(args, distributed=True):
-    model = smp.__dict__[args.model_name](
-        encoder_name=args.backbone,
-        encoder_weights='noisy-student' if 'efficientnet' in args.backbone else 'imagenet',
-        classes=args.num_classes,
-        in_channels=3
-    )
+
+    if args.model_name == 'segformer':
+        from transformers import SegformerForSemanticSegmentation
+        model = SegformerForSemanticSegmentation.from_pretrained(
+            f"nvidia/mit-{args.backbone}",
+            num_labels=args.num_classes
+        )
+    else:
+        model = smp.__dict__[args.model_name](
+            encoder_name=args.backbone,
+            encoder_weights='noisy-student' if 'efficientnet' in args.backbone else 'imagenet',
+            classes=args.num_classes,
+            in_channels=3
+        )
 
 
     # image_sizes = [int(x) for x in args.input_size.split(",")]
@@ -462,6 +470,12 @@ def train_one_epoch(
                     logits = model(images)
             else:
                 logits = model(images)
+
+            if args.model_name == 'segformer':
+                logits = nn.functional.interpolate(
+                    logits, size=targets.shape[-2:], mode="bilinear", align_corners=False
+                )
+
             loss = criterion(logits, targets)
             metric_dict = metric_fn(logits, targets)
 

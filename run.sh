@@ -14,20 +14,19 @@
 # done
 
 
-for model_name in FPN ; do
-    for fold in 1 ; do
+for model_name in DeepLabV3Plus ; do
+    for fold in 0 1 2 3 4 ; do
         make    fold=${fold} \
-                prefix='rnd_roi' \
+                prefix='rnd_roi_fp32' \
                 loss_weights='1,1,1' \
                 scheduler='cosine' \
-                backbone='timm-efficientnet-b5' \
+                backbone='timm-efficientnet-b4' \
                 epochs=30 \
-                input_size='512,512' \
+                input_size='768,768' \
                 num_classes=4 \
-                batch_size=32 \
+                batch_size=8 \
                 pretrained=True \
                 dataset='uw-gi' \
-                resume='logs/FPN/1/timm-efficientnet-b5_is512,512_bs32_e30_rnd_roi/checkpoint.pth' \
                 data_dir='data/uw-gi-25d' \
                 pretrained_checkpoint='' \
                 model_name=${model_name} \

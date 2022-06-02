@@ -241,7 +241,7 @@ def load_pretrained_checkpoint(model, path):
 def get_model(args, distributed=True):
     model = smp.__dict__[args.model_name](
         encoder_name=args.backbone,
-        encoder_weights='noisy-student' if args.pretrained else None,
+        encoder_weights='noisy-student' if 'efficientnet' in args.backbone else 'imagenet',
         classes=args.num_classes,
         in_channels=3
     )

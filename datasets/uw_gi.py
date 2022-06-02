@@ -143,6 +143,33 @@ class UWGI(torch.utils.data.Dataset):
         mask = mask[ymin:ymax, xmin:xmax]
         return image, mask
 
+    def clipping(self, image, low, up):
+        image = (image - low) / (up - low)
+        image[image < 0] = 0
+        image[image > 1] = 1
+        return image.astype(np.float32)
+
+    def organ_normalize(self, image):
+        # image: h x w x 3
+
+        organ_intensities = [
+            [3, 8556],
+            [5, 8358],
+            [4, 10727]
+        ]
+        n_channels = image.shape[-1]
+        all_channels = []
+        for i in range(n_channels):
+            channel = image[:, :, i]
+            for low, up in organ_intensities:
+                low, up= organ_intensities[i]
+                channel = self.clipping(channel, low, up)
+                all_channels.append(channel)
+
+        all_channels = np.stack(all_channels, axis=-1).astype(np.float32)
+        return all_channels
+
+
     def __getitem__(self, index):
         image_path = self.images[index]
         if self.multilabel:

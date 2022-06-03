@@ -472,6 +472,7 @@ def train_one_epoch(
                 logits = model(images)
 
             if args.model_name == 'segformer':
+                logits = logits.logits
                 logits = nn.functional.interpolate(
                     logits, size=targets.shape[-2:], mode="bilinear", align_corners=False
                 )

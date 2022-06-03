@@ -14,17 +14,17 @@
 # done
 
 
-for model_name in DeepLabV3Plus ; do
+for model_name in segformer ; do
     for fold in 0 1 2 3 4 ; do
         make    fold=${fold} \
                 prefix='rnd_roi_fp32' \
                 loss_weights='1,1,1' \
                 scheduler='cosine' \
-                backbone='timm-efficientnet-b4' \
+                backbone='b5' \
                 epochs=30 \
-                input_size='768,768' \
+                input_size='512,512' \
                 num_classes=4 \
-                batch_size=8 \
+                batch_size=12 \
                 pretrained=True \
                 dataset='uw-gi' \
                 data_dir='data/uw-gi-25d' \

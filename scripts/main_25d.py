@@ -35,7 +35,7 @@ def get_args_parser():
     parser.add_argument('--fold', default=0, type=int)
     parser.add_argument('--num_classes', default=4, type=int)
     parser.add_argument('--model_name', default='FPN', type=str)
-    parser.add_argument('--backbone', default='resnet34', type=str)
+    parser.add_argument('--backbone', default='timm-efficientnet-b5', type=str)
     parser.add_argument('--loss_weights', type=str, default='1,0,0')
     parser.add_argument('--pretrained_checkpoint', type=str, default='')
     parser.add_argument('--multilabel', type=utils.bool_flag, default=False)
@@ -74,6 +74,7 @@ def get_args_parser():
     parser.add_argument("--local_rank", default=0, type=int,
                         help="Please ignore and do not set this argument.")
     parser.add_argument('--pred', type=utils.bool_flag, default=False)
+    parser.add_argument('--pseudo', type=utils.bool_flag, default=False)
     parser.add_argument('--resume', type=str, default='')
     return parser
 
@@ -117,7 +118,7 @@ class Metric:
         preds = logits.argmax(dim=1)  # B x H x W
 
         all_dices = []
-        for i in range(num_classes):
+        for i in range(1, num_classes):
             pred_cls = preds == i
             target_cls = targets == i
             dice_cls = self.measure_dice(pred_cls, target_cls)
@@ -175,7 +176,8 @@ def get_uw_gi_dataset(args, name='train'):
             is_train=True,
             multilabel=args.multilabel,
             fold=args.fold,
-            transforms=train_transform
+            transforms=train_transform,
+            infer_pseudo=args.pseudo
         )
 
         train_sampler = torch.utils.data.DistributedSampler(
@@ -198,10 +200,11 @@ def get_uw_gi_dataset(args, name='train'):
             is_train=False,
             multilabel=args.multilabel,
             fold=args.fold,
-            transforms=valid_transform
+            transforms=valid_transform,
+            infer_pseudo=args.pseudo
         )
 
-        valid_sampler = None if args.pred else torch.utils.data.DistributedSampler(
+        valid_sampler = None if (args.pred or args.pseudo) else torch.utils.data.DistributedSampler(
             valid_dataset, shuffle=False)
         valid_data_loader = torch.utils.data.DataLoader(
             valid_dataset,
@@ -556,11 +559,71 @@ def predict(args):
     np.save(f"{save_dir}/preds.npy", all_preds)
 
 
+def predict_pseudo(args):
+    print("git:\n  {}\n".format(utils.get_sha()))
+    print("\n".join("%s: %s" % (k, str(v))
+          for k, v in sorted(dict(vars(args)).items())))
+    cudnn.benchmark = True
+
+    # ============ preparing data ... ============
+    if args.dataset == 'uw-gi':
+        valid_loader = get_dataset(args, name='valid')
+    else:
+        return
+
+    # ============ building Clusformer ... ============
+
+    models = []
+    for fold in range(5):
+        model, model_ema = get_model(args, False)
+        model = model.eval()
+
+        resume_path = args.resume.format(fold)
+        if os.path.isfile(resume_path):
+            utils.restart_from_checkpoint(
+                resume_path,
+                model=model,
+            )
+
+        models.append(model)
+
+    all_preds = []
+
+    from tqdm import tqdm
+
+    save_dir = "data/uw-gi-25d-pseudo/"
+    for batch in tqdm(valid_loader, total=len(valid_loader)):
+        images = batch['image'].cuda(non_blocking=True)
+        hs, ws = batch['h'], batch['w']
+        cases, days, slices = batch['case_id'], batch['day'], batch['slice']
+
+        with torch.no_grad():
+            logits = 0
+            for model in models:
+                logits += model(images)
+            logits = logits / len(models)
+            logits = logits.argmax(1)
+
+        batch_size = images.shape[0]
+        for i in range(batch_size):
+            h, w = hs[i].item(), ws[i].item()
+            pred = logits[i].detach().cpu().numpy()  # 512 x 512
+            pred = cv2.resize(pred.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST)
+            case, day, slice = cases[i], days[i], slices[i]
+            save_dir_ = f"{save_dir}/{case}/{day}"
+            os.makedirs(save_dir_, exist_ok=True)
+            slice = slice.replace('image', 'mask')
+            save_file = f"{save_dir_}/{slice}"
+            np.save(save_file, pred)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Train 2.5D', parents=[get_args_parser()])
     args = parser.parse_args()
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     if args.pred:
         predict(args)
+    elif args.pseudo:
+        predict_pseudo(args)
     else:
         train(args)

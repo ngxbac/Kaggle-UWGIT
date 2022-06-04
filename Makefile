@@ -17,9 +17,10 @@ dataset='uw-gi'
 data_dir='data/uw-gi-25d'
 pretrained=True
 pretrained_checkpoint=''
+log_prefix='logs'
 pred=False
 csv=train_valid_case_clean.csv
-output_dir=./logs_clean_v0/${model_name}/${fold}/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
+output_dir=./${log_prefix}/${model_name}/${fold}/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
 num_gpus=`nvidia-smi --list-gpus | wc -l`
 
 train:
@@ -41,6 +42,7 @@ train:
 	--epochs ${epochs} \
 	--resume ${resume} \
 	--pretrained ${pretrained} \
+	--pretrained_checkpoint ${pretrained_checkpoint} \
 	--lr ${lr} \
 	--loss_weights ${loss_weights} \
 	--scheduler ${scheduler} \

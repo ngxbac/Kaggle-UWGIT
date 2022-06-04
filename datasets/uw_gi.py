@@ -193,6 +193,9 @@ class UWGI(torch.utils.data.Dataset):
         mask = mask.astype(np.float32)
         image = np.transpose(image, (2, 0, 1)).astype(np.float32)
 
+        is_empty = mask.sum() == 0
+        is_empty = np.array([is_empty]).astype(np.float32)
+
         if self.multilabel:
             mask = np.transpose(mask, (2, 0, 1)).astype(np.float32)
         else:
@@ -205,6 +208,7 @@ class UWGI(torch.utils.data.Dataset):
         return {
             'image': image,
             'target': mask,
+            'empty': is_empty,
             'case_id': case_id,
             'day': day,
             'slice': slice

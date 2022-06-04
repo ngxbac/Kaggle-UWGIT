@@ -31,9 +31,9 @@ def get_args_parser():
     # dataset parameters
     parser.add_argument('--csv', default='train_valid.csv')
     parser.add_argument('--data_dir', default='data/uw-gi-25d/')
-    parser.add_argument('--input_size', default="320,384", type=str)
+    parser.add_argument('--input_size', default="512,512", type=str)
     parser.add_argument('--fold', default=0, type=int)
-    parser.add_argument('--num_classes', default=3, type=int)
+    parser.add_argument('--num_classes', default=4, type=int)
     parser.add_argument('--model_name', default='FPN', type=str)
     parser.add_argument('--backbone', default='resnet34', type=str)
     parser.add_argument('--loss_weights', type=str, default='1,0,0')
@@ -547,10 +547,13 @@ def predict(args):
 
         with torch.no_grad():
             logits = model(images)
+            logits = logits.argmax(1)
         all_preds.append(logits.detach().cpu())
 
     all_preds = np.concatenate(all_preds, axis=0)
-    np.save(f"logs/pred_{args.fold}.npy", all_preds)
+    save_dir = "/".join(args.resume.split("/")[:-1])
+    print(save_dir)
+    np.save(f"{save_dir}/preds.npy", all_preds)
 
 
 if __name__ == '__main__':

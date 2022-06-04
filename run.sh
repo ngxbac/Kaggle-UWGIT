@@ -14,17 +14,18 @@
 # done
 
 
-for model_name in segformer ; do
+for model_name in FPN ; do
     for fold in 0 1 2 3 4 ; do
         make    fold=${fold} \
+                csv='csv/Unet_keep_0.5.csv' \
                 prefix='rnd_roi_fp32' \
                 loss_weights='1,1,1' \
                 scheduler='cosine' \
-                backbone='b5' \
+                backbone='timm-efficientnet-b5' \
                 epochs=30 \
                 input_size='512,512' \
                 num_classes=4 \
-                batch_size=12 \
+                batch_size=16 \
                 pretrained=True \
                 dataset='uw-gi' \
                 data_dir='data/uw-gi-25d' \

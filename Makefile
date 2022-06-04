@@ -18,13 +18,14 @@ data_dir='data/uw-gi-25d'
 pretrained=True
 pretrained_checkpoint=''
 pred=False
-output_dir=./logs/${model_name}/${fold}/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
+csv=train_valid_case_clean.csv
+output_dir=./logs_clean_v0/${model_name}/${fold}/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
 num_gpus=`nvidia-smi --list-gpus | wc -l`
 
 train:
 	PYTHONPATH=. \
 	python -u -m torch.distributed.launch --nproc_per_node=${num_gpus} --master_port 2106 scripts/main_25d.py \
-	--csv train_valid_case_clean.csv \
+	--csv ${csv} \
 	--fold ${fold} \
 	--use_ema ${use_ema} \
 	--model_name ${model_name} \

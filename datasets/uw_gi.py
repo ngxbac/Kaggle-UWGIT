@@ -108,6 +108,7 @@ class UWGI(torch.utils.data.Dataset):
         self.transforms = transforms
         self.multilabel = multilabel
         self.infer_pseudo = infer_pseudo
+        self.is_train = is_train
 
     def __len__(self):
         return len(self.images)
@@ -139,7 +140,7 @@ class UWGI(torch.utils.data.Dataset):
 
         mask = image.replace('_image', '_mask')
         mask = np.load(mask)
-        if not is_pseudo:
+        if not is_pseudo or self.infer_pseudo:
             mask = mask.max(axis=0) # h x w
 
         return mask
@@ -200,7 +201,7 @@ class UWGI(torch.utils.data.Dataset):
         image_h, image_w = image.shape[:2]
         image = image / image.max()
 
-        if np.random.rand() < 0.5:
+        if np.random.rand() < 0.5 and self.is_train:
             image, mask = self.crop_roi(image, mask)
 
         image = image * 255

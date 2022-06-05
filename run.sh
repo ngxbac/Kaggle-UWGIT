@@ -18,7 +18,8 @@ for model_name in FPN ; do
     for fold in 0 1 2 3 4 ; do
         make    fold=${fold} \
                 csv='csv/Unet_keep_0.5.csv' \
-                prefix='rnd_roi_fp32' \
+                prefix='fix' \
+                log_prefix='logs_clean_v0' \
                 loss_weights='1,1,1' \
                 scheduler='cosine' \
                 backbone='timm-efficientnet-b5' \
@@ -29,7 +30,7 @@ for model_name in FPN ; do
                 pretrained=True \
                 dataset='uw-gi' \
                 data_dir='data/uw-gi-25d' \
-                pretrained_checkpoint='' \
+                pretrained_checkpoint='no' \
                 model_name=${model_name} \
                 use_ema=False \
                 train

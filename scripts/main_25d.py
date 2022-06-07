@@ -19,6 +19,7 @@ from datasets.abdomen import Abdomen
 import segmentation_models_pytorch as smp
 from criterions.segmentation import criterion_2d, dice_coef, iou_coef, ComboLoss
 from models.vnet import model as vmodel
+from schedulers import OneCycleLRWithWarmup
 # from models.TransUNet.networks.vit_seg_modeling import VisionTransformer as ViT_seg
 # from models.TransUNet.networks.vit_seg_modeling import CONFIGS as CONFIGS_ViT_seg
 
@@ -322,9 +323,18 @@ def train(args):
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr,
                                   weight_decay=args.weight_decay)
 
+    total_steps = args.epochs * len(train_loader)
     if args.scheduler == 'cosine':
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=args.epochs, eta_min=0)
+            optimizer, T_max=total_steps, eta_min=0)
+    elif args.scheduler == 'onecycle':
+        scheduler = OneCycleLRWithWarmup(
+            optimizer=optimizer,
+            num_steps=total_steps,
+            lr_range=(args.lr, args.lr / 10),
+            warmup_fraction=0.1,
+            init_lr=args.lr / 10
+        )
     else:
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode='max', patience=2, factor=0.1
@@ -389,10 +399,10 @@ def train(args):
         else:
             current_score = valid_stats['dice']
 
-        if scheduler.__class__.__name__ == 'ReduceLROnPlateau':
-            scheduler.step(current_score)
-        else:
-            scheduler.step()
+        # if scheduler.__class__.__name__ == 'ReduceLROnPlateau':
+        #     scheduler.step(current_score)
+        # else:
+        #     scheduler.step()
 
         if current_score > best_score:
             best_score = current_score
@@ -502,7 +512,7 @@ def train_one_epoch(
             if model_ema is not None:
                 model_ema.update(model)
 
-            # scheduler.step()
+            scheduler.step()
 
         # logging
         torch.cuda.synchronize()

@@ -15,15 +15,15 @@
 
 
 for model_name in FPN ; do
-    for fold in 0 1 2 3 4 ; do
+    for fold in 0 ; do
         make    fold=${fold} \
                 csv='csv/Unet_keep_0.5.csv' \
-                prefix='fix' \
+                prefix='05_1cycle' \
                 log_prefix='logs_clean_v0' \
                 loss_weights='1,1,1' \
-                scheduler='cosine' \
+                scheduler='onecycle' \
                 backbone='timm-efficientnet-b5' \
-                epochs=30 \
+                epochs=50 \
                 input_size='512,512' \
                 num_classes=4 \
                 batch_size=16 \

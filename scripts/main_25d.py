@@ -82,14 +82,28 @@ def get_args_parser():
 
 class Criterion(nn.Module):
     def __init__(
-        self
+        self,
+        args
     ):
         super().__init__()
-        self.loss_fnc = criterion_2d
+        loss_weights = args.loss_weights
+        loss_weights = [int(x) for x in loss_weights.split(",")]
+        self.seg_loss = ComboLoss(
+            args.multilabel,
+            loss_weights[0],
+            loss_weights[1],
+            loss_weights[2]
+        )
+
+        self.aux_loss = nn.BCEWithLogitsLoss()
 
     def forward(self, logits, targets):
-        ce_loss = self.loss_fnc(logits, targets)
-        return ce_loss
+        masks, auxs = logits
+        gt_masks, gt_auxs = targets
+        # print(np.unique(gt_auxs.detach().cpu().numpy(), return_counts=True))
+        seg_loss = self.seg_loss(masks, gt_masks)
+        aux_loss = self.aux_loss(auxs, gt_auxs)
+        return (seg_loss + aux_loss) / 2
 
 
 class Metric:
@@ -132,10 +146,20 @@ class Metric:
         return metric_dict
 
     def __call__(self, logits, targets):
+        masks, auxs = logits
+        gt_masks, gt_auxs = targets
+
         if self.multilabel:
-            return self.multilabel_metric(logits, targets)
+            ret = self.multilabel_metric(masks, gt_masks)
         else:
-            return self.multiclass_metric(logits, targets)
+            ret = self.multiclass_metric(masks, gt_masks)
+
+        f1_score = utils.f1_score(
+            auxs.sigmoid() > 0.5,
+            gt_auxs
+        )
+        ret['f1'] = f1_score
+        return ret
 
 
 def get_abdomen_dataset(args):
@@ -251,11 +275,18 @@ def get_model(args, distributed=True):
             num_labels=args.num_classes
         )
     else:
+        aux_params=dict(
+            pooling='avg',             # one of 'avg', 'max'
+            dropout=0.5,               # dropout ratio, default is None
+            activation=None,      # activation function, default is None
+            classes=1,                 # define number of output labels
+        )
         model = smp.__dict__[args.model_name](
             encoder_name=args.backbone,
             encoder_weights='noisy-student' if 'efficientnet' in args.backbone else 'imagenet',
             classes=args.num_classes,
-            in_channels=3
+            in_channels=3,
+            aux_params=aux_params
         )
 
 
@@ -310,13 +341,14 @@ def train(args):
     model, model_ema = get_model(args)
 
     # ============ preparing loss ... ============
-    loss_weights = args.loss_weights
-    loss_weights = [int(x) for x in loss_weights.split(",")]
-    criterion = ComboLoss(
-        args.multilabel,
-        loss_weights[0],
-        loss_weights[1],
-        loss_weights[2]
+    # loss_weights = args.loss_weights
+    # loss_weights = [int(x) for x in loss_weights.split(",")]
+    criterion = Criterion(
+        # args.multilabel,
+        # loss_weights[0],
+        # loss_weights[1],
+        # loss_weights[2]
+        args
     )
 
     # ============ preparing optimizer ... ============
@@ -475,7 +507,10 @@ def train_one_epoch(
     for batch in metric_logger.log_every(data_loader, 50, header):
         # move images to gpu
         images = batch['image'].cuda(non_blocking=True)
-        targets = batch['target'].cuda(non_blocking=True)
+        targets = [
+            batch['target'].cuda(non_blocking=True),
+            batch['empty'].cuda(non_blocking=True)
+        ]
 
         with torch.cuda.amp.autocast(fp16_scaler is not None):
             if not is_train:
@@ -517,9 +552,9 @@ def train_one_epoch(
         # logging
         torch.cuda.synchronize()
         metric_logger.update(loss=loss.item())
-        metric_logger.update(dice=metric_dict['dice'])
-        # for k, v in metric_dict.items():
-        #     metric_logger.update(**{k: v})
+        # metric_logger.update(dice=metric_dict['dice'])
+        for k, v in metric_dict.items():
+            metric_logger.update(**{k: v})
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
     # gather the stats from all processes
@@ -551,6 +586,7 @@ def predict(args):
         )
 
     all_preds = []
+    all_auxs = []
 
     from tqdm import tqdm
     for batch in tqdm(valid_loader, total=len(valid_loader)):
@@ -559,14 +595,17 @@ def predict(args):
         targets = batch['target'].cuda(non_blocking=True)
 
         with torch.no_grad():
-            logits = model(images)
+            logits, auxs = model(images)
             logits = logits.argmax(1)
         all_preds.append(logits.detach().cpu())
+        all_auxs.append(auxs.detach().cpu())
 
     all_preds = np.concatenate(all_preds, axis=0)
+    all_auxs = np.concatenate(all_auxs, axis=0)
     save_dir = "/".join(args.resume.split("/")[:-1])
     print(save_dir)
     np.save(f"{save_dir}/preds.npy", all_preds)
+    np.save(f"{save_dir}/auxs.npy", all_preds)
 
 
 def predict_pseudo(args):

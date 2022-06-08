@@ -24,20 +24,20 @@ def get_transform(dataset='train', image_sizes=[320, 384]):
                 A.Blur(blur_limit=3, p=0.1),
             ], p=0.25),
 
-            A.OneOf([
-                A.CLAHE(clip_limit=2),
-                A.IAASharpen(),
-                A.IAAEmboss(),
-                A.RandomBrightnessContrast(),
-            ], p=0.25),
+            # A.OneOf([
+            #     A.CLAHE(clip_limit=2),
+            #     A.IAASharpen(),
+            #     A.IAAEmboss(),
+            #     A.RandomBrightnessContrast(),
+            # ], p=0.25),
 
             A.Cutout(num_holes=8, max_h_size=32, max_w_size=32, fill_value=0, p=0.25),
-            A.Normalize(),
+            # A.Normalize()
         ], p=1.0),
 
         "valid": A.Compose([
             A.Resize(image_sizes[0], image_sizes[1]),
-            A.Normalize(),
+            # A.Normalize()
         ], p=1.0)
     }
 
@@ -198,14 +198,15 @@ class UWGI(torch.utils.data.Dataset):
             mask = self.get_mask_multiclass(image_path, is_pseudo)
 
         image = np.load(image_path)
+        # image = self.organ_normalize(image)
         image_h, image_w = image.shape[:2]
         image = image / image.max()
 
-        if np.random.rand() < 0.5 and self.is_train:
-            image, mask = self.crop_roi(image, mask)
+        # if np.random.rand() < 0.5 and self.is_train:
+        #     image, mask = self.crop_roi(image, mask)
 
-        image = image * 255
-        image = image.astype(np.uint8)
+        # image = image * 255
+        # image = image.astype(np.uint8)
 
         ret = self.transforms(image=image, mask=mask)
         image = ret['image']

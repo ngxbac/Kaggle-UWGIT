@@ -313,7 +313,7 @@ def get_model(args, distributed=True):
             encoder_name=args.backbone,
             encoder_weights=encoder_weights,
             classes=args.num_classes,
-            in_channels=3,
+            in_channels=5,
             # decoder_channels=decoder_channels,
             encoder_depth=encoder_depth,
             aux_params=aux_params
@@ -342,7 +342,7 @@ def get_model(args, distributed=True):
             model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
         model = nn.parallel.DistributedDataParallel(
-            model, device_ids=[args.gpu])
+            model, device_ids=[args.gpu], find_unused_parameters=True)
     else:
         model = nn.DataParallel(model)
 

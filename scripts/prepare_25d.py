@@ -20,28 +20,20 @@ def load_image(data_dir, case_id, day, slice, stride):
     cur_image = load_image_(data_dir, case_id, day, slice)
     assert cur_image is not None
 
-    all_images = []
-    for i in range(stride, 0, -1):
-        prev_slice = slice_number - i
+    h, w = cur_image.shape[:2]
+    all_images = np.zeros((h, w, 5), dtype=np.float32)
+    for ii, i in enumerate(range(-2, 3)):
+        prev_slice = slice_number + i
         prev_slice = str(prev_slice).zfill(4)
         prev_slice = f"slice_{prev_slice}"
         prev_image = load_image_(data_dir, case_id, day, prev_slice)
-        prev_image = cur_image if prev_image is None else prev_image
-        all_images.append(prev_image)
+        if prev_image is None:
+            continue
 
-    all_images.append(cur_image)
+        all_images[:, :, ii] = prev_image
 
-    for i in range(1, stride + 1):
-        next_slice = slice_number + i
-        next_slice = str(next_slice).zfill(4)
-        next_slice = f"slice_{next_slice}"
-        next_image = load_image_(data_dir, case_id, day, next_slice)
-        next_image = cur_image if next_image is None else next_image
-        all_images.append(next_image)
-
-    image = np.array(all_images) # 3 x h x w
-    image = np.transpose(image, (1, 2, 0)) # h x w x 3
-    return image
+    # all_images = np.transpose(all_images, (1, 2, 0)) # h x w x c
+    return all_images
 
 
 def rle_decode(rle, mask, fill=255):

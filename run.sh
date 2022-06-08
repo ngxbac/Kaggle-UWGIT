@@ -18,18 +18,18 @@ for model_name in FPN ; do
     for fold in 0 ; do
         make    fold=${fold} \
                 csv='csv/Unet_keep_0.5.csv' \
-                prefix='05' \
-                log_prefix='logs_clean_v0' \
+                prefix='sce_loss' \
+                log_prefix='logs_clean_5s' \
                 loss_weights='1,1,1' \
                 scheduler='cosine' \
-                backbone='senet154' \
+                backbone='timm-efficientnet-b5' \
                 epochs=30 \
                 input_size='512,512' \
                 num_classes=4 \
                 batch_size=16 \
                 pretrained=True \
                 dataset='uw-gi' \
-                data_dir='data/uw-gi-25d' \
+                data_dir='data/uw-gi-25d-5' \
                 pretrained_checkpoint='no' \
                 model_name=${model_name} \
                 use_ema=False \

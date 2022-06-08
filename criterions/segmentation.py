@@ -124,6 +124,36 @@ class PolyBCELoss(_Loss):
         return (polyl)
 
 
+class SCELoss(torch.nn.Module):
+    def __init__(self, alpha=0.5, beta=0.5, num_classes=4):
+        super(SCELoss, self).__init__()
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.alpha = alpha
+        self.beta = beta
+        self.num_classes = num_classes
+        self.cross_entropy = torch.nn.CrossEntropyLoss()
+
+    def forward(self, pred, labels):
+        # CCE
+        ce = self.cross_entropy(pred, labels)
+
+
+        if len(pred.shape) - len(labels.shape) == 1:
+            labels = labels.unsqueeze(1).long()
+
+        # RCE
+        pred = F.softmax(pred, dim=1)
+        pred = torch.clamp(pred, min=1e-7, max=1.0) # b x h x w
+        label_one_hot = to_one_hot(labels, num_classes=self.num_classes)
+#         label_one_hot = torch.nn.functional.one_hot(labels, self.num_classes).float().to(self.device)
+        label_one_hot = torch.clamp(label_one_hot, min=1e-4, max=1.0)
+        rce = (-1*torch.sum(pred * torch.log(label_one_hot), dim=1))
+
+        # Loss
+        loss = self.alpha * ce + self.beta * rce.mean()
+        return loss
+
+
 def dice_coef(y_true, y_pred, thr=0.5, dim=(2, 3), epsilon=0.001):
     y_true = y_true.to(torch.float32)
     y_pred = (y_pred > thr).to(torch.float32)
@@ -156,7 +186,8 @@ class ComboLoss(nn.Module):
         mode = 'multilabel' if multilabel else 'multiclass'
         self.dice_loss_fn = smp.losses.DiceLoss(mode=mode)
         self.tvk_loss_fn = smp.losses.TverskyLoss(mode=mode)
-        self.poly_loss_fn = PolyBCELoss() if multilabel else PolyLoss()
+        # self.poly_loss_fn = PolyBCELoss() if multilabel else PolyLoss()
+        self.poly_loss_fn = SCELoss()
         # self.poly_loss_fn = nn.BCEWithLogitsLoss() if multilabel else nn.CrossEntropyLoss()
 
     def forward(self, y_pred, y_true):

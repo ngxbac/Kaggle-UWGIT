@@ -79,11 +79,17 @@ def cut_edge(data, threshold=0.1, percent=0.5):
 
 
 class UWGI(torch.utils.data.Dataset):
-    def __init__(self, data_dir, csv, fold=0, multilabel=True, is_train=True, label=True, transforms=None):
+    def __init__(self, data_dir, csv, fold=0, multilabel=True, is_train=True, label=True, transforms=None, infer_pseudo=False):
         df = pd.read_csv(csv)
-        if is_train:
+
+        if infer_pseudo:
+            print("Infer pseudo!")
+            df = df[df['is_pseudo'] == True]
+        elif is_train:
+            print("Training!")
             df = df[df.fold != fold]
         else:
+            print("Validation!")
             df = df[df.fold == fold]
 
         # case_ids = df['case'].unique()
@@ -91,10 +97,18 @@ class UWGI(torch.utils.data.Dataset):
         # for case_id in case_ids:
         #     images = glob.glob(f"{data_dir}/{case_id}/*/*_image.npy")
         #     self.images += images
+
         df['mask'] = df['mask'].apply(lambda x: f"{data_dir}/{x}".replace("_mask", "_image"))
         self.images = df['mask'].values
+        if 'is_pseudo' in df.columns:
+            self.is_pseudos = df['is_pseudo'].values
+        else:
+            self.is_pseudos = [False] * len(df)
+
         self.transforms = transforms
         self.multilabel = multilabel
+        self.infer_pseudo = infer_pseudo
+        self.is_train = is_train
 
     def __len__(self):
         return len(self.images)
@@ -120,10 +134,15 @@ class UWGI(torch.utils.data.Dataset):
         mask = np.transpose(mask, (1, 2, 0))
         return mask
 
-    def get_mask_multiclass(self, image):
+    def get_mask_multiclass(self, image, is_pseudo=False):
+        if is_pseudo and not self.infer_pseudo:
+            image = image.replace('uw-gi-25d', 'uw-gi-25d-pseudo')
+
         mask = image.replace('_image', '_mask')
         mask = np.load(mask)
-        mask = mask.max(axis=0) # h x w
+        if not is_pseudo or self.infer_pseudo:
+            mask = mask.max(axis=0) # h x w
+
         return mask
 
 
@@ -172,15 +191,17 @@ class UWGI(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         image_path = self.images[index]
+        is_pseudo = self.is_pseudos[index]
         if self.multilabel:
             mask = self.get_mask_multilabel(image_path)
         else:
-            mask = self.get_mask_multiclass(image_path)
+            mask = self.get_mask_multiclass(image_path, is_pseudo)
 
         image = np.load(image_path)
+        image_h, image_w = image.shape[:2]
         image = image / image.max()
 
-        if np.random.rand() < 0.5:
+        if np.random.rand() < 0.5 and self.is_train:
             image, mask = self.crop_roi(image, mask)
 
         image = image * 255
@@ -192,6 +213,9 @@ class UWGI(torch.utils.data.Dataset):
 
         mask = mask.astype(np.float32)
         image = np.transpose(image, (2, 0, 1)).astype(np.float32)
+
+        is_empty = mask.sum() == 0
+        is_empty = np.array([is_empty]).astype(np.float32)
 
         if self.multilabel:
             mask = np.transpose(mask, (2, 0, 1)).astype(np.float32)
@@ -205,7 +229,10 @@ class UWGI(torch.utils.data.Dataset):
         return {
             'image': image,
             'target': mask,
+            'empty': is_empty,
             'case_id': case_id,
             'day': day,
+            'h': image_h,
+            'w': image_w,
             'slice': slice
         }

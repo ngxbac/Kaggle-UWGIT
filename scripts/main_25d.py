@@ -19,6 +19,7 @@ from datasets.abdomen import Abdomen
 import segmentation_models_pytorch as smp
 from criterions.segmentation import criterion_2d, dice_coef, iou_coef, ComboLoss
 from models.vnet import model as vmodel
+from schedulers import OneCycleLRWithWarmup
 # from models.TransUNet.networks.vit_seg_modeling import VisionTransformer as ViT_seg
 # from models.TransUNet.networks.vit_seg_modeling import CONFIGS as CONFIGS_ViT_seg
 
@@ -31,17 +32,18 @@ def get_args_parser():
     # dataset parameters
     parser.add_argument('--csv', default='train_valid.csv')
     parser.add_argument('--data_dir', default='data/uw-gi-25d/')
-    parser.add_argument('--input_size', default="320,384", type=str)
+    parser.add_argument('--input_size', default="512,512", type=str)
     parser.add_argument('--fold', default=0, type=int)
-    parser.add_argument('--num_classes', default=3, type=int)
+    parser.add_argument('--num_classes', default=4, type=int)
     parser.add_argument('--model_name', default='FPN', type=str)
-    parser.add_argument('--backbone', default='resnet34', type=str)
+    parser.add_argument('--backbone', default='timm-efficientnet-b5', type=str)
     parser.add_argument('--loss_weights', type=str, default='1,0,0')
     parser.add_argument('--pretrained_checkpoint', type=str, default='')
     parser.add_argument('--multilabel', type=utils.bool_flag, default=False)
     parser.add_argument('--use_ema', type=utils.bool_flag, default=False)
     parser.add_argument('--ema_decay', default=0.997, type=float)
     parser.add_argument('--pretrained', type=utils.bool_flag, default=True)
+    parser.add_argument('--aux', type=utils.bool_flag, default=False)
     parser.add_argument('--dataset', default="uw-gi", type=str)
     parser.add_argument('--vit_patches_size', default=16, type=int)
 
@@ -74,25 +76,45 @@ def get_args_parser():
     parser.add_argument("--local_rank", default=0, type=int,
                         help="Please ignore and do not set this argument.")
     parser.add_argument('--pred', type=utils.bool_flag, default=False)
+    parser.add_argument('--pseudo', type=utils.bool_flag, default=False)
     parser.add_argument('--resume', type=str, default='')
     return parser
 
 
 class Criterion(nn.Module):
     def __init__(
-        self
+        self,
+        args
     ):
         super().__init__()
-        self.loss_fnc = criterion_2d
+        loss_weights = args.loss_weights
+        loss_weights = [int(x) for x in loss_weights.split(",")]
+        self.seg_loss = ComboLoss(
+            args.multilabel,
+            loss_weights[0],
+            loss_weights[1],
+            loss_weights[2]
+        )
+
+        self.aux = args.aux
+
+        self.aux_loss = nn.BCEWithLogitsLoss()
 
     def forward(self, logits, targets):
-        ce_loss = self.loss_fnc(logits, targets)
-        return ce_loss
+        if args.aux:
+            masks, auxs = logits
+            gt_masks, gt_auxs = targets
+            seg_loss = self.seg_loss(masks, gt_masks)
+            aux_loss = self.aux_loss(auxs, gt_auxs)
+            return (seg_loss + aux_loss) / 2
+        else:
+            return self.seg_loss(logits, targets)
 
 
 class Metric:
-    def __init__(self, multilabel=True):
+    def __init__(self, multilabel=True, aux=False):
         self.multilabel = multilabel
+        self.aux = aux
 
     def multilabel_metric(self, logits, targets):
         preds = logits.sigmoid()
@@ -117,7 +139,7 @@ class Metric:
         preds = logits.argmax(dim=1)  # B x H x W
 
         all_dices = []
-        for i in range(num_classes):
+        for i in range(1, num_classes):
             pred_cls = preds == i
             target_cls = targets == i
             dice_cls = self.measure_dice(pred_cls, target_cls)
@@ -130,10 +152,27 @@ class Metric:
         return metric_dict
 
     def __call__(self, logits, targets):
-        if self.multilabel:
-            return self.multilabel_metric(logits, targets)
+        ret_dict = {}
+
+        if self.aux:
+            masks, auxs = logits
+            gt_masks, gt_auxs = targets
+            f1_score = utils.f1_score(
+                auxs.sigmoid() > 0.5,
+                gt_auxs
+            )
+            ret_dict['f1'] = f1_score
         else:
-            return self.multiclass_metric(logits, targets)
+            masks = logits
+            gt_masks = targets
+
+        if self.multilabel:
+            ret = self.multilabel_metric(masks, gt_masks)
+        else:
+            ret = self.multiclass_metric(masks, gt_masks)
+
+        ret_dict.update(ret)
+        return ret_dict
 
 
 def get_abdomen_dataset(args):
@@ -175,7 +214,8 @@ def get_uw_gi_dataset(args, name='train'):
             is_train=True,
             multilabel=args.multilabel,
             fold=args.fold,
-            transforms=train_transform
+            transforms=train_transform,
+            infer_pseudo=args.pseudo
         )
 
         train_sampler = torch.utils.data.DistributedSampler(
@@ -198,10 +238,11 @@ def get_uw_gi_dataset(args, name='train'):
             is_train=False,
             multilabel=args.multilabel,
             fold=args.fold,
-            transforms=valid_transform
+            transforms=valid_transform,
+            infer_pseudo=args.pseudo
         )
 
-        valid_sampler = None if args.pred else torch.utils.data.DistributedSampler(
+        valid_sampler = None if (args.pred or args.pseudo) else torch.utils.data.DistributedSampler(
             valid_dataset, shuffle=False)
         valid_data_loader = torch.utils.data.DataLoader(
             valid_dataset,
@@ -247,11 +288,35 @@ def get_model(args, distributed=True):
             num_labels=args.num_classes
         )
     else:
+
+        if args.aux:
+            aux_params=dict(
+                pooling='avg',             # one of 'avg', 'max'
+                dropout=0.5,               # dropout ratio, default is None
+                activation=None,      # activation function, default is None
+                classes=1,                 # define number of output labels
+            )
+        else:
+            aux_params = None
+        encoder_weights = 'imagenet'
+        encoder_depth = 5
+
+        decoder_channels = (1024, 512, 256, 128, 64)
+        if 'timm-efficientnet' in args.backbone:
+            encoder_weights = 'noisy-student'
+        elif 'convnext' in args.backbone:
+            encoder_weights = 'imagenet38422kft1k'
+            encoder_depth = 4
+            decoder_channels = decoder_channels[:-1]
+
         model = smp.__dict__[args.model_name](
             encoder_name=args.backbone,
-            encoder_weights='noisy-student' if 'efficientnet' in args.backbone else 'imagenet',
+            encoder_weights=encoder_weights,
             classes=args.num_classes,
-            in_channels=3
+            in_channels=3,
+            # decoder_channels=decoder_channels,
+            encoder_depth=encoder_depth,
+            aux_params=aux_params
         )
 
 
@@ -277,7 +342,7 @@ def get_model(args, distributed=True):
             model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
         model = nn.parallel.DistributedDataParallel(
-            model, device_ids=[args.gpu], find_unused_parameters=True)
+            model, device_ids=[args.gpu])
     else:
         model = nn.DataParallel(model)
 
@@ -306,22 +371,32 @@ def train(args):
     model, model_ema = get_model(args)
 
     # ============ preparing loss ... ============
-    loss_weights = args.loss_weights
-    loss_weights = [int(x) for x in loss_weights.split(",")]
-    criterion = ComboLoss(
-        args.multilabel,
-        loss_weights[0],
-        loss_weights[1],
-        loss_weights[2]
+    # loss_weights = args.loss_weights
+    # loss_weights = [int(x) for x in loss_weights.split(",")]
+    criterion = Criterion(
+        # args.multilabel,
+        # loss_weights[0],
+        # loss_weights[1],
+        # loss_weights[2]
+        args
     )
 
     # ============ preparing optimizer ... ============
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr,
                                   weight_decay=args.weight_decay)
 
+    total_steps = args.epochs * len(train_loader)
     if args.scheduler == 'cosine':
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=args.epochs, eta_min=0)
+            optimizer, T_max=total_steps, eta_min=0)
+    elif args.scheduler == 'onecycle':
+        scheduler = OneCycleLRWithWarmup(
+            optimizer=optimizer,
+            num_steps=total_steps,
+            lr_range=(args.lr, args.lr / 10),
+            warmup_fraction=0.1,
+            init_lr=args.lr / 10
+        )
     else:
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode='max', patience=2, factor=0.1
@@ -386,10 +461,10 @@ def train(args):
         else:
             current_score = valid_stats['dice']
 
-        if scheduler.__class__.__name__ == 'ReduceLROnPlateau':
-            scheduler.step(current_score)
-        else:
-            scheduler.step()
+        # if scheduler.__class__.__name__ == 'ReduceLROnPlateau':
+        #     scheduler.step(current_score)
+        # else:
+        #     scheduler.step()
 
         if current_score > best_score:
             best_score = current_score
@@ -462,7 +537,14 @@ def train_one_epoch(
     for batch in metric_logger.log_every(data_loader, 50, header):
         # move images to gpu
         images = batch['image'].cuda(non_blocking=True)
-        targets = batch['target'].cuda(non_blocking=True)
+
+        if args.aux:
+            targets = [
+                batch['target'].cuda(non_blocking=True),
+                batch['empty'].cuda(non_blocking=True)
+            ]
+        else:
+            targets = batch['target'].cuda(non_blocking=True)
 
         with torch.cuda.amp.autocast(fp16_scaler is not None):
             if not is_train:
@@ -476,6 +558,20 @@ def train_one_epoch(
                 logits = nn.functional.interpolate(
                     logits, size=targets.shape[-2:], mode="bilinear", align_corners=False
                 )
+
+            if 'convnext' in args.backbone:
+                if args.aux:
+                    logits, auxs = logits
+                    masks = targets[0]
+                else:
+                    masks = targets
+
+                logits = nn.functional.interpolate(
+                    logits, size=masks.shape[-2:], mode="bilinear", align_corners=False
+                )
+
+                if args.aux:
+                    logits = (logits, auxs)
 
             loss = criterion(logits, targets)
             metric_dict = metric_fn(logits, targets)
@@ -499,14 +595,14 @@ def train_one_epoch(
             if model_ema is not None:
                 model_ema.update(model)
 
-            # scheduler.step()
+            scheduler.step()
 
         # logging
         torch.cuda.synchronize()
         metric_logger.update(loss=loss.item())
-        metric_logger.update(dice=metric_dict['dice'])
-        # for k, v in metric_dict.items():
-        #     metric_logger.update(**{k: v})
+        # metric_logger.update(dice=metric_dict['dice'])
+        for k, v in metric_dict.items():
+            metric_logger.update(**{k: v})
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
     # gather the stats from all processes
@@ -538,6 +634,7 @@ def predict(args):
         )
 
     all_preds = []
+    all_auxs = []
 
     from tqdm import tqdm
     for batch in tqdm(valid_loader, total=len(valid_loader)):
@@ -546,11 +643,75 @@ def predict(args):
         targets = batch['target'].cuda(non_blocking=True)
 
         with torch.no_grad():
-            logits = model(images)
+            logits, auxs = model(images)
+            logits = logits.argmax(1)
         all_preds.append(logits.detach().cpu())
+        all_auxs.append(auxs.detach().cpu())
 
     all_preds = np.concatenate(all_preds, axis=0)
-    np.save(f"logs/pred_{args.fold}.npy", all_preds)
+    all_auxs = np.concatenate(all_auxs, axis=0)
+    save_dir = "/".join(args.resume.split("/")[:-1])
+    print(save_dir)
+    np.save(f"{save_dir}/preds.npy", all_preds)
+    np.save(f"{save_dir}/auxs.npy", all_preds)
+
+
+def predict_pseudo(args):
+    print("git:\n  {}\n".format(utils.get_sha()))
+    print("\n".join("%s: %s" % (k, str(v))
+          for k, v in sorted(dict(vars(args)).items())))
+    cudnn.benchmark = True
+
+    # ============ preparing data ... ============
+    if args.dataset == 'uw-gi':
+        valid_loader = get_dataset(args, name='valid')
+    else:
+        return
+
+    # ============ building Clusformer ... ============
+
+    models = []
+    for fold in range(5):
+        model, model_ema = get_model(args, False)
+        model = model.eval()
+
+        resume_path = args.resume.format(fold)
+        if os.path.isfile(resume_path):
+            utils.restart_from_checkpoint(
+                resume_path,
+                model=model,
+            )
+
+        models.append(model)
+
+    all_preds = []
+
+    from tqdm import tqdm
+
+    save_dir = "data/uw-gi-25d-pseudo/"
+    for batch in tqdm(valid_loader, total=len(valid_loader)):
+        images = batch['image'].cuda(non_blocking=True)
+        hs, ws = batch['h'], batch['w']
+        cases, days, slices = batch['case_id'], batch['day'], batch['slice']
+
+        with torch.no_grad():
+            logits = 0
+            for model in models:
+                logits += model(images)
+            logits = logits / len(models)
+            logits = logits.argmax(1)
+
+        batch_size = images.shape[0]
+        for i in range(batch_size):
+            h, w = hs[i].item(), ws[i].item()
+            pred = logits[i].detach().cpu().numpy()  # 512 x 512
+            pred = cv2.resize(pred.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST)
+            case, day, slice = cases[i], days[i], slices[i]
+            save_dir_ = f"{save_dir}/{case}/{day}"
+            os.makedirs(save_dir_, exist_ok=True)
+            slice = slice.replace('image', 'mask')
+            save_file = f"{save_dir_}/{slice}"
+            np.save(save_file, pred)
 
 
 if __name__ == '__main__':
@@ -559,5 +720,7 @@ if __name__ == '__main__':
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     if args.pred:
         predict(args)
+    elif args.pseudo:
+        predict_pseudo(args)
     else:
         train(args)

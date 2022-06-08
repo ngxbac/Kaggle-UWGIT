@@ -43,6 +43,7 @@ def get_args_parser():
     parser.add_argument('--use_ema', type=utils.bool_flag, default=False)
     parser.add_argument('--ema_decay', default=0.997, type=float)
     parser.add_argument('--pretrained', type=utils.bool_flag, default=True)
+    parser.add_argument('--aux', type=utils.bool_flag, default=False)
     parser.add_argument('--dataset', default="uw-gi", type=str)
     parser.add_argument('--vit_patches_size', default=16, type=int)
 
@@ -95,20 +96,25 @@ class Criterion(nn.Module):
             loss_weights[2]
         )
 
+        self.aux = args.aux
+
         self.aux_loss = nn.BCEWithLogitsLoss()
 
     def forward(self, logits, targets):
-        masks, auxs = logits
-        gt_masks, gt_auxs = targets
-        # print(np.unique(gt_auxs.detach().cpu().numpy(), return_counts=True))
-        seg_loss = self.seg_loss(masks, gt_masks)
-        aux_loss = self.aux_loss(auxs, gt_auxs)
-        return (seg_loss + aux_loss) / 2
+        if args.aux:
+            masks, auxs = logits
+            gt_masks, gt_auxs = targets
+            seg_loss = self.seg_loss(masks, gt_masks)
+            aux_loss = self.aux_loss(auxs, gt_auxs)
+            return (seg_loss + aux_loss) / 2
+        else:
+            return self.seg_loss(logits, targets)
 
 
 class Metric:
-    def __init__(self, multilabel=True):
+    def __init__(self, multilabel=True, aux=False):
         self.multilabel = multilabel
+        self.aux = aux
 
     def multilabel_metric(self, logits, targets):
         preds = logits.sigmoid()
@@ -146,20 +152,27 @@ class Metric:
         return metric_dict
 
     def __call__(self, logits, targets):
-        masks, auxs = logits
-        gt_masks, gt_auxs = targets
+        ret_dict = {}
+
+        if self.aux:
+            masks, auxs = logits
+            gt_masks, gt_auxs = targets
+            f1_score = utils.f1_score(
+                auxs.sigmoid() > 0.5,
+                gt_auxs
+            )
+            ret_dict['f1'] = f1_score
+        else:
+            masks = logits
+            gt_masks = targets
 
         if self.multilabel:
             ret = self.multilabel_metric(masks, gt_masks)
         else:
             ret = self.multiclass_metric(masks, gt_masks)
 
-        f1_score = utils.f1_score(
-            auxs.sigmoid() > 0.5,
-            gt_auxs
-        )
-        ret['f1'] = f1_score
-        return ret
+        ret_dict.update(ret)
+        return ret_dict
 
 
 def get_abdomen_dataset(args):
@@ -275,17 +288,34 @@ def get_model(args, distributed=True):
             num_labels=args.num_classes
         )
     else:
-        aux_params=dict(
-            pooling='avg',             # one of 'avg', 'max'
-            dropout=0.5,               # dropout ratio, default is None
-            activation=None,      # activation function, default is None
-            classes=1,                 # define number of output labels
-        )
+
+        if args.aux:
+            aux_params=dict(
+                pooling='avg',             # one of 'avg', 'max'
+                dropout=0.5,               # dropout ratio, default is None
+                activation=None,      # activation function, default is None
+                classes=1,                 # define number of output labels
+            )
+        else:
+            aux_params = None
+        encoder_weights = 'imagenet'
+        encoder_depth = 5
+
+        decoder_channels = (1024, 512, 256, 128, 64)
+        if 'timm-efficientnet' in args.backbone:
+            encoder_weights = 'noisy-student'
+        elif 'convnext' in args.backbone:
+            encoder_weights = 'imagenet38422kft1k'
+            encoder_depth = 4
+            decoder_channels = decoder_channels[:-1]
+
         model = smp.__dict__[args.model_name](
             encoder_name=args.backbone,
-            encoder_weights='noisy-student' if 'efficientnet' in args.backbone else 'imagenet',
+            encoder_weights=encoder_weights,
             classes=args.num_classes,
             in_channels=3,
+            # decoder_channels=decoder_channels,
+            encoder_depth=encoder_depth,
             aux_params=aux_params
         )
 
@@ -312,7 +342,7 @@ def get_model(args, distributed=True):
             model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
         model = nn.parallel.DistributedDataParallel(
-            model, device_ids=[args.gpu], find_unused_parameters=True)
+            model, device_ids=[args.gpu])
     else:
         model = nn.DataParallel(model)
 
@@ -507,10 +537,14 @@ def train_one_epoch(
     for batch in metric_logger.log_every(data_loader, 50, header):
         # move images to gpu
         images = batch['image'].cuda(non_blocking=True)
-        targets = [
-            batch['target'].cuda(non_blocking=True),
-            batch['empty'].cuda(non_blocking=True)
-        ]
+
+        if args.aux:
+            targets = [
+                batch['target'].cuda(non_blocking=True),
+                batch['empty'].cuda(non_blocking=True)
+            ]
+        else:
+            targets = batch['target'].cuda(non_blocking=True)
 
         with torch.cuda.amp.autocast(fp16_scaler is not None):
             if not is_train:
@@ -524,6 +558,20 @@ def train_one_epoch(
                 logits = nn.functional.interpolate(
                     logits, size=targets.shape[-2:], mode="bilinear", align_corners=False
                 )
+
+            if 'convnext' in args.backbone:
+                if args.aux:
+                    logits, auxs = logits
+                    masks = targets[0]
+                else:
+                    masks = targets
+
+                logits = nn.functional.interpolate(
+                    logits, size=masks.shape[-2:], mode="bilinear", align_corners=False
+                )
+
+                if args.aux:
+                    logits = (logits, auxs)
 
             loss = criterion(logits, targets)
             metric_dict = metric_fn(logits, targets)

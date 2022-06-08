@@ -47,7 +47,7 @@ train:
 	--loss_weights ${loss_weights} \
 	--scheduler ${scheduler} \
 	--pred ${pred} \
-	--use_fp16 False
+	--use_fp16 True
 
 valid:
 	PYTHONPATH=. CUDA_VISIBLE_DEVICES=0 python scripts/main_25d.py \

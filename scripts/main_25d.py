@@ -189,7 +189,7 @@ def get_abdomen_dataset(args):
     train_dataset = torch.utils.data.ConcatDataset(train_dataset)
 
     train_sampler = torch.utils.data.DistributedSampler(
-        train_dataset, shuffle=True)
+        train_dataset, shuffle=True) if args.distributed else None
     train_data_loader = torch.utils.data.DataLoader(
         train_dataset,
         sampler=train_sampler,
@@ -197,6 +197,7 @@ def get_abdomen_dataset(args):
         num_workers=args.num_workers,
         pin_memory=True,
         drop_last=True,
+        shuffle=train_sampler is None,
     )
     print(f"Train data loaded: there are {len(train_dataset)} images.")
     return train_data_loader
@@ -219,7 +220,7 @@ def get_uw_gi_dataset(args, name='train'):
         )
 
         train_sampler = torch.utils.data.DistributedSampler(
-            train_dataset, shuffle=True)
+            train_dataset, shuffle=True) if args.distributed else None
         train_data_loader = torch.utils.data.DataLoader(
             train_dataset,
             sampler=train_sampler,
@@ -227,6 +228,7 @@ def get_uw_gi_dataset(args, name='train'):
             num_workers=args.num_workers,
             pin_memory=True,
             drop_last=True,
+            shuffle=train_sampler is None,
         )
         print(f"Train data loaded: there are {len(train_dataset)} images.")
         return train_data_loader
@@ -242,7 +244,7 @@ def get_uw_gi_dataset(args, name='train'):
             infer_pseudo=args.pseudo
         )
 
-        valid_sampler = None if (args.pred or args.pseudo) else torch.utils.data.DistributedSampler(
+        valid_sampler = None if (args.pred or args.pseudo or not args.distributed) else torch.utils.data.DistributedSampler(
             valid_dataset, shuffle=False)
         valid_data_loader = torch.utils.data.DataLoader(
             valid_dataset,
@@ -251,6 +253,7 @@ def get_uw_gi_dataset(args, name='train'):
             num_workers=args.num_workers,
             pin_memory=True,
             drop_last=False,
+            shuffle=False
         )
         print(f"Valid data loaded: there are {len(valid_dataset)} images.")
         return valid_data_loader
@@ -305,29 +308,20 @@ def get_model(args, distributed=True):
         if 'timm-efficientnet' in args.backbone:
             encoder_weights = 'noisy-student'
         elif 'convnext' in args.backbone:
-            encoder_weights = 'imagenet38422kft1k'
+            encoder_weights = 'imagenet'
             encoder_depth = 4
-            decoder_channels = decoder_channels[:-1]
 
         model = smp.__dict__[args.model_name](
             encoder_name=args.backbone,
             encoder_weights=encoder_weights,
             classes=args.num_classes,
-            in_channels=5,
-            # decoder_channels=decoder_channels,
+            in_channels=3,
             encoder_depth=encoder_depth,
             aux_params=aux_params
         )
 
+    print(model)
 
-    # image_sizes = [int(x) for x in args.input_size.split(",")]
-    # config_vit = CONFIGS_ViT_seg[args.model_name]
-    # config_vit.n_classes = args.num_classes
-    # config_vit.n_skip = 3
-    # if args.model_name.find('R50') != -1:
-    #     config_vit.patches.grid = (int(image_sizes[0]/ args.vit_patches_size), int(image_sizes[0] / args.vit_patches_size))
-    # model = ViT_seg(config_vit, img_size=image_sizes[0], num_classes=config_vit.n_classes).cuda()
-    # model.load_from(weights=np.load(config_vit.pretrained_path))
 
     # move networks to gpu
     model = model.cuda()
@@ -353,7 +347,11 @@ def get_model(args, distributed=True):
 
 
 def train(args):
-    utils.init_distributed_mode(args)
+    args.distributed = hasattr(args, 'gpu')
+
+    if args.distributed:
+        utils.init_distributed_mode(args)
+
     utils.fix_random_seeds(args.seed)
     print("git:\n  {}\n".format(utils.get_sha()))
     print("\n".join("%s: %s" % (k, str(v))
@@ -368,16 +366,12 @@ def train(args):
         valid_loader = None
 
     # ============ building Clusformer ... ============
-    model, model_ema = get_model(args)
+    model, model_ema = get_model(args, args.distributed)
 
     # ============ preparing loss ... ============
     # loss_weights = args.loss_weights
     # loss_weights = [int(x) for x in loss_weights.split(",")]
     criterion = Criterion(
-        # args.multilabel,
-        # loss_weights[0],
-        # loss_weights[1],
-        # loss_weights[2]
         args
     )
 
@@ -428,21 +422,20 @@ def train(args):
     start_epoch = to_restore["epoch"]
     best_score = to_restore['best_score']
 
-    # valid_stats = valid_one_epoch(model, criterion, valid_loader, optimizer, scheduler, 0, fp16_scaler, False, args)
-
     start_time = time.time()
-    print("Starting eyestate training !")
+    print("Starting training !")
     for epoch in range(start_epoch, args.epochs):
-        train_loader.sampler.set_epoch(epoch)
+        if args.distributed:
+            train_loader.sampler.set_epoch(epoch)
 
         # ============ training one epoch ... ============
         train_stats = train_one_epoch(model, model_ema, criterion,
                                       train_loader, optimizer, scheduler, epoch, fp16_scaler, True, args)
 
         # Distributed bn
-        timm.utils.distribute_bn(
-            model, torch.distributed.get_world_size(), True)
-
+        if args.distributed:
+            timm.utils.distribute_bn(
+                model, torch.distributed.get_world_size(), True)
 
         # ============ validate one epoch ... ============
         if valid_loader is not None:
@@ -452,8 +445,9 @@ def train(args):
             valid_stats = train_stats
 
         if model_ema is not None:
-            timm.utils.distribute_bn(
-                model_ema, torch.distributed.get_world_size(), True)
+            if args.distributed:
+                timm.utils.distribute_bn(
+                    model_ema, torch.distributed.get_world_size(), True)
             ema_valid_stats = train_one_epoch(model_ema.module, None, criterion,
                                   valid_loader, optimizer, scheduler, epoch, fp16_scaler, False, args)
 
@@ -503,7 +497,7 @@ def train(args):
                            'epoch': epoch}
         log_valid_stats = {**{f'valid_{k}': v for k, v in valid_stats.items()},
                            'epoch': epoch}
-        if utils.is_main_process():
+        if not args.distributed or utils.is_main_process():
             with (Path(args.output_dir) / "log.txt").open("a") as f:
                 f.write(json.dumps(log_train_stats) + "\n")
                 f.write(json.dumps(log_valid_stats) + "\n")
@@ -559,19 +553,19 @@ def train_one_epoch(
                     logits, size=targets.shape[-2:], mode="bilinear", align_corners=False
                 )
 
-            if 'convnext' in args.backbone:
-                if args.aux:
-                    logits, auxs = logits
-                    masks = targets[0]
-                else:
-                    masks = targets
+            # if 'convnext' in args.backbone:
+            #     if args.aux:
+            #         logits, auxs = logits
+            #         masks = targets[0]
+            #     else:
+            #         masks = targets
 
-                logits = nn.functional.interpolate(
-                    logits, size=masks.shape[-2:], mode="bilinear", align_corners=False
-                )
+            #     logits = nn.functional.interpolate(
+            #         logits, size=masks.shape[-2:], mode="bilinear", align_corners=False
+            #     )
 
-                if args.aux:
-                    logits = (logits, auxs)
+            #     if args.aux:
+            #         logits = (logits, auxs)
 
             loss = criterion(logits, targets)
             metric_dict = metric_fn(logits, targets)
@@ -606,7 +600,8 @@ def train_one_epoch(
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
     # gather the stats from all processes
-    metric_logger.synchronize_between_processes()
+    if args.distributed:
+        metric_logger.synchronize_between_processes()
     print(f"[{prefix}] Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 

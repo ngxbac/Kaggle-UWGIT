@@ -201,6 +201,7 @@ class UWGI(torch.utils.data.Dataset):
         # image = self.organ_normalize(image)
         image_h, image_w = image.shape[:2]
         image = image / image.max()
+        image = image.astype(np.float32)
 
         # if np.random.rand() < 0.5 and self.is_train:
         #     image, mask = self.crop_roi(image, mask)

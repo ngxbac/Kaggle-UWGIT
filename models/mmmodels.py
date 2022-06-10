@@ -1,3 +1,4 @@
+from tabnanny import check
 import torch
 from mmcv.utils import config
 from mmseg.models import build_segmentor
@@ -8,17 +9,19 @@ def get_mmseg_models(args):
     cfg.model.decode_head.num_classes = 4
     model = build_segmentor(cfg.model)
 
-    checkpoint = torch.hub.load_state_dict_from_url(cfg.checkpoint_file)
-    state_dict = model.state_dict()
+    if hasattr(cfg, 'checkpoint_file'):
+        checkpoint = torch.hub.load_state_dict_from_url(cfg.checkpoint_file)[
+            'state_dict']
+        state_dict = model.state_dict()
 
-    count = 0
-    for k, v in checkpoint['state_dict'].items():
-        if k in state_dict:
-            state_dict[k] = v
-            count += 1
+        count = 0
+        for k, v in checkpoint.items():
+            if k in state_dict and checkpoint[k].shape == state_dict[k].shape:
+                state_dict[k] = v
+                count += 1
 
-    print(f"[+] Loaded {count} params")
-    model.load_state_dict(state_dict)
+        print(f"[+] Loaded {count} params")
+        model.load_state_dict(state_dict)
 
     return model
 

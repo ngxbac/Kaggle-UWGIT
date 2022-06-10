@@ -14,7 +14,7 @@
 # done
 
 
-for model_name in mmseg-fpn-r50 ; do
+for model_name in mmseg-upernet-convnext-tiny ; do
     for fold in 0 ; do
         make    fold=${fold} \
                 csv='csv/Unet_keep_0.5.csv' \

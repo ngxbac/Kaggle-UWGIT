@@ -221,7 +221,7 @@ class UWGI(torch.utils.data.Dataset):
         if self.multilabel:
             mask = np.transpose(mask, (2, 0, 1)).astype(np.float32)
         else:
-            mask = mask.astype(np.uint8)
+            mask = mask.astype(np.int64)
 
         case_id = self.get_case_id(image_path)
         day = self.get_day(image_path)

@@ -10,10 +10,14 @@ def get_mmseg_models(args):
 
     checkpoint = torch.hub.load_state_dict_from_url(cfg.checkpoint_file)
     state_dict = model.state_dict()
+
+    count = 0
     for k, v in checkpoint['state_dict'].items():
         if k in state_dict:
             state_dict[k] = v
+            count += 1
 
+    print(f"[+] Loaded {count} params")
     model.load_state_dict(state_dict)
 
     return model

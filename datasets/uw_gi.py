@@ -31,7 +31,8 @@ def get_transform(dataset='train', image_sizes=[320, 384]):
             #     A.RandomBrightnessContrast(),
             # ], p=0.25),
 
-            A.Cutout(num_holes=8, max_h_size=32, max_w_size=32, fill_value=0, p=0.25),
+            A.Cutout(num_holes=8, max_h_size=32,
+                     max_w_size=32, fill_value=0, p=0.25),
             # A.Normalize()
         ], p=1.0),
 
@@ -98,7 +99,8 @@ class UWGI(torch.utils.data.Dataset):
         #     images = glob.glob(f"{data_dir}/{case_id}/*/*_image.npy")
         #     self.images += images
 
-        df['mask'] = df['mask'].apply(lambda x: f"{data_dir}/{x}".replace("_mask", "_image"))
+        df['mask'] = df['mask'].apply(
+            lambda x: f"{data_dir}/{x}".replace("_mask", "_image"))
         self.images = df['mask'].values
         if 'is_pseudo' in df.columns:
             self.is_pseudos = df['is_pseudo'].values
@@ -113,11 +115,10 @@ class UWGI(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.images)
 
-
     def get_mask_multilabel(self, image):
         mask = image.replace('_image', '_mask')
         mask = np.load(mask)
-        mask[mask !=0] = 1 # 3 x h x w
+        mask[mask != 0] = 1  # 3 x h x w
         # 0: large bowel
         # 1: small bowel
         # 2: stomach
@@ -141,10 +142,9 @@ class UWGI(torch.utils.data.Dataset):
         mask = image.replace('_image', '_mask')
         mask = np.load(mask)
         if not is_pseudo or self.infer_pseudo:
-            mask = mask.max(axis=0) # h x w
+            mask = mask.max(axis=0)  # h x w
 
         return mask
-
 
     def get_case_id(self, image_path):
         return image_path.split("/")[-3]
@@ -181,13 +181,12 @@ class UWGI(torch.utils.data.Dataset):
         for i in range(n_channels):
             channel = image[:, :, i]
             for low, up in organ_intensities:
-                low, up= organ_intensities[i]
+                low, up = organ_intensities[i]
                 channel = self.clipping(channel, low, up)
                 all_channels.append(channel)
 
         all_channels = np.stack(all_channels, axis=-1).astype(np.float32)
         return all_channels
-
 
     def __getitem__(self, index):
         image_path = self.images[index]
@@ -222,7 +221,7 @@ class UWGI(torch.utils.data.Dataset):
         if self.multilabel:
             mask = np.transpose(mask, (2, 0, 1)).astype(np.float32)
         else:
-            mask = mask.astype(np.int)
+            mask = mask.astype(np.uint8)
 
         case_id = self.get_case_id(image_path)
         day = self.get_day(image_path)

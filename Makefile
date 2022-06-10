@@ -8,7 +8,7 @@ prefix=''
 resume=''
 loss_weights=''
 scheduler='onecycle'
-lr=1e-3
+lr=1e-4
 num_classes=4
 use_ema=False
 model_name='FPN'
@@ -23,13 +23,16 @@ csv=train_valid_case_clean.csv
 output_dir=./${log_prefix}/${model_name}/${fold}/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
 num_gpus=`nvidia-smi --list-gpus | wc -l`
 distributed=0
+mmcfg=mmconfigs/fpn_r50.py
 
-if [[ ${distributed} -eq 0 ]]
-then
-	command=python
-else
-	command=python -u -m torch.distributed.launch --nproc_per_node=${num_gpus} --master_port 2106
-fi
+# if [[ ${distributed} -eq 0 ]]
+# then
+# 	command=python
+# else
+# 	command=python -u -m torch.distributed.launch --nproc_per_node=${num_gpus} --master_port 2106
+# fi
+
+command=python
 
 train:
 	PYTHONPATH=. \
@@ -55,6 +58,7 @@ train:
 	--loss_weights ${loss_weights} \
 	--scheduler ${scheduler} \
 	--pred ${pred} \
+	--mmcfg ${mmcfg} \
 	--use_fp16 False
 
 valid:

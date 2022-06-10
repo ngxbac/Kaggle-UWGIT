@@ -14,7 +14,7 @@
 # done
 
 
-for model_name in FPN ; do
+for model_name in mmseg-fpn-r50 ; do
     for fold in 0 ; do
         make    fold=${fold} \
                 csv='csv/Unet_keep_0.5.csv' \
@@ -27,6 +27,7 @@ for model_name in FPN ; do
                 input_size='320,320' \
                 num_classes=4 \
                 batch_size=16 \
+                lr=1e-4 \
                 pretrained=True \
                 dataset='uw-gi' \
                 data_dir='data/uw-gi-25d' \

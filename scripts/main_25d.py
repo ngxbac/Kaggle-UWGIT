@@ -18,7 +18,7 @@ from datasets.uw_gi import UWGI, get_transform
 from datasets.abdomen import Abdomen
 import segmentation_models_pytorch as smp
 from criterions.segmentation import criterion_2d, dice_coef, iou_coef, ComboLoss
-from models.vnet import model as vmodel
+from models.mmmodels import get_mmseg_models
 from schedulers import OneCycleLRWithWarmup
 # from models.TransUNet.networks.vit_seg_modeling import VisionTransformer as ViT_seg
 # from models.TransUNet.networks.vit_seg_modeling import CONFIGS as CONFIGS_ViT_seg
@@ -45,6 +45,7 @@ def get_args_parser():
     parser.add_argument('--pretrained', type=utils.bool_flag, default=True)
     parser.add_argument('--aux', type=utils.bool_flag, default=False)
     parser.add_argument('--dataset', default="uw-gi", type=str)
+    parser.add_argument('--mmcfg', default='', type=str)
     parser.add_argument('--vit_patches_size', default=16, type=int)
 
     # Training/Optimization parameters
@@ -126,7 +127,7 @@ class Metric:
 
         return metric_dict
 
-    def measure_dice(self, y_pred, y_true, dim=(1,2), epsilon=1e-8):
+    def measure_dice(self, y_pred, y_true, dim=(1, 2), epsilon=1e-8):
         inter = (y_true*y_pred).sum(dim=dim)
         den = y_true.sum(dim=dim) + y_pred.sum(dim=dim)
         dice = ((2*inter+epsilon)/(den+epsilon)).mean()
@@ -290,10 +291,11 @@ def get_model(args, distributed=True):
             f"nvidia/mit-{args.backbone}",
             num_labels=args.num_classes
         )
+    elif 'mmseg' in args.model_name and os.path.isfile(args.mmcfg):
+        model = get_mmseg_models(args)
     else:
-
         if args.aux:
-            aux_params=dict(
+            aux_params = dict(
                 pooling='avg',             # one of 'avg', 'max'
                 dropout=0.5,               # dropout ratio, default is None
                 activation=None,      # activation function, default is None
@@ -321,7 +323,6 @@ def get_model(args, distributed=True):
         )
 
     print(model)
-
 
     # move networks to gpu
     model = model.cuda()
@@ -411,13 +412,12 @@ def train(args):
             #os.path.join(args.output_dir, "checkpoint.pth"),
             args.resume,
             model=model,
-    	    run_variables=to_restore,
+            run_variables=to_restore,
             optimizer=optimizer,
             fp16_scaler=fp16_scaler,
             scheduler=scheduler,
             criterion=criterion
         )
-
 
     start_epoch = to_restore["epoch"]
     best_score = to_restore['best_score']
@@ -449,7 +449,7 @@ def train(args):
                 timm.utils.distribute_bn(
                     model_ema, torch.distributed.get_world_size(), True)
             ema_valid_stats = train_one_epoch(model_ema.module, None, criterion,
-                                  valid_loader, optimizer, scheduler, epoch, fp16_scaler, False, args)
+                                              valid_loader, optimizer, scheduler, epoch, fp16_scaler, False, args)
 
             current_score = max(valid_stats['dice'], ema_valid_stats['dice'])
         else:
@@ -547,25 +547,11 @@ def train_one_epoch(
             else:
                 logits = model(images)
 
-            if args.model_name == 'segformer':
-                logits = logits.logits
-                logits = nn.functional.interpolate(
-                    logits, size=targets.shape[-2:], mode="bilinear", align_corners=False
-                )
-
-            # if 'convnext' in args.backbone:
-            #     if args.aux:
-            #         logits, auxs = logits
-            #         masks = targets[0]
-            #     else:
-            #         masks = targets
-
-            #     logits = nn.functional.interpolate(
-            #         logits, size=masks.shape[-2:], mode="bilinear", align_corners=False
-            #     )
-
-            #     if args.aux:
-            #         logits = (logits, auxs)
+            logits = nn.functional.interpolate(
+                input=logits,
+                size=targets.shape[-2:],
+                mode='bilinear',
+                align_corners=False)
 
             loss = criterion(logits, targets)
             metric_dict = metric_fn(logits, targets)
@@ -700,7 +686,8 @@ def predict_pseudo(args):
         for i in range(batch_size):
             h, w = hs[i].item(), ws[i].item()
             pred = logits[i].detach().cpu().numpy()  # 512 x 512
-            pred = cv2.resize(pred.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST)
+            pred = cv2.resize(pred.astype(np.uint8), (w, h),
+                              interpolation=cv2.INTER_NEAREST)
             case, day, slice = cases[i], days[i], slices[i]
             save_dir_ = f"{save_dir}/{case}/{day}"
             os.makedirs(save_dir_, exist_ok=True)

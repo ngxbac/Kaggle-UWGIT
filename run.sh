@@ -14,7 +14,7 @@
 # done
 
 
-for model_name in mmseg-upernet-convnext-tiny ; do
+for model_name in mmseg-segformer-b3; do
     for fold in 0 ; do
         make    fold=${fold} \
                 csv='csv/Unet_keep_0.5.csv' \
@@ -22,16 +22,17 @@ for model_name in mmseg-upernet-convnext-tiny ; do
                 log_prefix='logs_clean_3s' \
                 loss_weights='1,1,1' \
                 scheduler='cosine' \
-                backbone='tu-ecaresnet50t' \
+                backbone='none' \
                 epochs=30 \
                 input_size='320,320' \
                 num_classes=4 \
-                batch_size=16 \
+                batch_size=8 \
                 lr=1e-4 \
                 pretrained=True \
                 dataset='uw-gi' \
                 data_dir='data/uw-gi-25d' \
                 pretrained_checkpoint='no' \
+                mmcfg='mmconfigs/segformer_mit_b3.py' \
                 model_name=${model_name} \
                 use_ema=False \
                 train

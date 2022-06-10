@@ -1,6 +1,6 @@
 # norm_cfg = dict(type='SyncBN', requires_grad=True)
 custom_imports = dict(imports='mmcls.models', allow_failed_imports=False)
-checkpoint_file = 'https://download.openmmlab.com/mmsegmentation/v0.5/convnext/upernet_convnext_base_fp16_640x640_160k_ade20k/upernet_convnext_base_fp16_640x640_160k_ade20k_20220227_182859-9280e39b.pth'  # noqa
+checkpoint_file = 'https://download.openmmlab.com/mmclassification/v0/convnext/downstream/convnext-base_3rdparty_32xb128-noema_in1k_20220301-2a0ee547.pth'  # noqa
 model = dict(
     type='EncoderDecoder',
     pretrained=None,

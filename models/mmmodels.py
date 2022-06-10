@@ -16,6 +16,9 @@ def get_mmseg_models(args):
 
         count = 0
         for k, v in checkpoint.items():
+            if not 'backbone' in k:
+                continue
+
             if k in state_dict and checkpoint[k].shape == state_dict[k].shape:
                 state_dict[k] = v
                 count += 1

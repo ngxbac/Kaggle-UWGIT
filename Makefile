@@ -23,7 +23,7 @@ csv=train_valid_case_clean.csv
 output_dir=./${log_prefix}/${model_name}/${fold}/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}
 num_gpus=`nvidia-smi --list-gpus | wc -l`
 distributed=0
-mmcfg=mmconfigs/upernet_convnext_tiny.py
+mmcfg=mmconfigs/segformer_mit_b0.py
 
 # if [[ ${distributed} -eq 0 ]]
 # then

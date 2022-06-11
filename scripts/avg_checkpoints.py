@@ -48,8 +48,13 @@ def checkpoint_metric(checkpoint_path):
     return metric
 
 
-def load_state_dict(ckpt):
-    state_dict = torch.load(ckpt)['model']
+def load_state_dict(ckpt, no_ema):
+    if no_ema:
+        state_dict = torch.load(ckpt)['model']
+    else:
+        print("Load ema ")
+        state_dict = torch.load(ckpt)['ema']
+
     return state_dict
 
 
@@ -89,7 +94,7 @@ def main():
     avg_state_dict = {}
     avg_counts = {}
     for c in avg_checkpoints:
-        new_state_dict = load_state_dict(c)
+        new_state_dict = load_state_dict(c, args.no_use_ema)
         if not new_state_dict:
             print("Error: Checkpoint ({}) doesn't exist".format(args.checkpoint))
             continue

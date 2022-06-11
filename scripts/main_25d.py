@@ -348,7 +348,8 @@ def get_model(args, distributed=True):
 
 
 def train(args):
-    args.distributed = hasattr(args, 'gpu')
+    # args.distributed = hasattr(args, 'gpu')
+    args.distributed = True
 
     if args.distributed:
         utils.init_distributed_mode(args)

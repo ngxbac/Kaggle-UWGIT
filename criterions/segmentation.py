@@ -187,8 +187,8 @@ class ComboLoss(nn.Module):
         self.dice_loss_fn = smp.losses.DiceLoss(mode=mode)
         self.tvk_loss_fn = smp.losses.TverskyLoss(mode=mode)
         # self.poly_loss_fn = PolyBCELoss() if multilabel else PolyLoss()
-        self.poly_loss_fn = SCELoss()
-        # self.poly_loss_fn = nn.BCEWithLogitsLoss() if multilabel else nn.CrossEntropyLoss()
+        # self.poly_loss_fn = SCELoss()
+        self.poly_loss_fn = nn.BCEWithLogitsLoss() if multilabel else nn.CrossEntropyLoss()
 
     def forward(self, y_pred, y_true):
         loss = 0

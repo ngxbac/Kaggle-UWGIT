@@ -6,7 +6,7 @@ from mmseg.models import build_segmentor
 
 def get_mmseg_models(args):
     cfg = config.Config.fromfile(args.mmcfg)
-    cfg.model.decode_head.num_classes = 4
+    cfg.model.decode_head.num_classes = args.num_classes
     model = build_segmentor(cfg.model)
 
     if hasattr(cfg, 'checkpoint_file'):

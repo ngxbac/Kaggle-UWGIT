@@ -14,20 +14,20 @@
 # done
 
 
-for model_name in mmseg-segformer-b3; do
+for model_name in FPN ; do
     for fold in 0 ; do
         make    fold=${fold} \
                 csv='csv/Unet_keep_0.5.csv' \
-                prefix='sce_loss_att' \
+                prefix='baseline' \
                 log_prefix='logs_clean_3s' \
-                loss_weights='1,1,1' \
+                loss_weights='1,0,1' \
                 scheduler='cosine' \
-                backbone='none' \
+                backbone='timm-efficientnet-b5' \
                 epochs=30 \
-                input_size='320,320' \
-                num_classes=4 \
-                batch_size=8 \
-                lr=1e-4 \
+                input_size='512,512' \
+                num_classes=3 \
+                batch_size=16 \
+                lr=1e-3 \
                 pretrained=True \
                 dataset='uw-gi' \
                 data_dir='data/uw-gi-25d' \
@@ -35,6 +35,7 @@ for model_name in mmseg-segformer-b3; do
                 mmcfg='mmconfigs/segformer_mit_b3.py' \
                 model_name=${model_name} \
                 use_ema=False \
+                multilabel=True \
                 train
     done
 done

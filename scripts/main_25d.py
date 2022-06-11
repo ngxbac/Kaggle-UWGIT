@@ -423,6 +423,11 @@ def train(args):
     start_epoch = to_restore["epoch"]
     best_score = to_restore['best_score']
 
+    # checkpoint storage
+    from collections import namedtuple
+    Checkpoint = namedtuple("Checkpoint", field_names=["obj", "logpath", "metric"])
+    storage = []
+
     start_time = time.time()
     print("Starting training !")
     for epoch in range(start_epoch, args.epochs):
@@ -491,9 +496,20 @@ def train(args):
         if is_save_best:
             utils.save_on_master(save_dict, os.path.join(
                 args.output_dir, 'best.pth'))
-        if args.saveckp_freq and epoch % args.saveckp_freq == 0:
-            utils.save_on_master(save_dict, os.path.join(
-                args.output_dir, f'checkpoint{epoch:04}.pth'))
+
+        # Keep only top 5 checkpoints
+        ckpt_path = os.path.join(args.output_dir, f'checkpoint{epoch:04}.pth')
+        utils.save_on_master(save_dict, ckpt_path)
+        storage.append(Checkpoint(obj=save_dict, logpath=ckpt_path, metric=current_score))
+        storage = sorted(storage, key=lambda x: x.metric, reverse=True)
+        if len(storage) > 5:
+            last_item = storage.pop(-1)
+            if os.path.isfile(last_item.logpath):
+                try:
+                    os.remove(last_item.logpath)
+                except OSError:
+                    pass
+
         log_train_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                            'epoch': epoch}
         log_valid_stats = {**{f'valid_{k}': v for k, v in valid_stats.items()},

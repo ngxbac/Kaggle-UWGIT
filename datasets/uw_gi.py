@@ -9,8 +9,15 @@ import albumentations as A
 def get_transform(dataset='train', image_sizes=[320, 384]):
     data_transforms = {
         "train": A.Compose([
-            A.Resize(image_sizes[0], image_sizes[1]),
+            # A.Resize(image_sizes[0], image_sizes[1]),
+            A.RandomResizedCrop(
+                height=image_sizes[0],
+                width=image_sizes[1],
+                scale=(0.25, 1.0),
+                ratio=(0.75, 1.3333333333333333),
+                interpolation=1, p=1.0),
             A.HorizontalFlip(p=0.5),
+            A.VerticalFlip(p=0.5),
             A.ShiftScaleRotate(shift_limit=0.0625,
                                scale_limit=0.05, rotate_limit=30, p=0.5),
             A.OneOf([

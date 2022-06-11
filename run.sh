@@ -18,7 +18,7 @@ for model_name in FPN ; do
     for fold in 0 ; do
         make    fold=${fold} \
                 csv='csv/Unet_keep_0.5.csv' \
-                prefix='baseline_hard_aug' \
+                prefix='baseline_hard_aug_ema' \
                 log_prefix='logs_clean_3s' \
                 loss_weights='1,0,1' \
                 scheduler='cosine' \
@@ -34,7 +34,7 @@ for model_name in FPN ; do
                 pretrained_checkpoint='no' \
                 mmcfg='mmconfigs/segformer_mit_b3.py' \
                 model_name=${model_name} \
-                use_ema=False \
+                use_ema=True \
                 multilabel=True \
                 train
     done

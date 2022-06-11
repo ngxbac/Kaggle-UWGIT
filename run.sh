@@ -18,7 +18,7 @@ for model_name in FPN ; do
     for fold in 0 ; do
         make    fold=${fold} \
                 csv='csv/Unet_keep_0.5.csv' \
-                prefix='baseline' \
+                prefix='stride3' \
                 log_prefix='logs_clean_3s' \
                 loss_weights='1,0,1' \
                 scheduler='cosine' \

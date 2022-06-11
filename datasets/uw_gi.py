@@ -1,6 +1,8 @@
 import numpy as np
 import glob
+import os
 import torch
+import cv2
 import pandas as pd
 from utils.misc import load_img, load_msk
 import albumentations as A
@@ -80,7 +82,18 @@ def cut_edge(data, threshold=0.1, percent=0.5):
 
 
 class UWGI(torch.utils.data.Dataset):
-    def __init__(self, data_dir, csv, fold=0, multilabel=True, is_train=True, label=True, transforms=None, infer_pseudo=False):
+    def __init__(self,
+                 data_dir,
+                 csv,
+                 fold=0,
+                 multilabel=True,
+                 is_train=True,
+                 label=True,
+                 transforms=None,
+                 infer_pseudo=False):
+
+        self.stride = 3
+        self.image_dir = 'data/uw-madison-gi-tract-image-segmentation/train/'
         df = pd.read_csv(csv)
 
         if infer_pseudo:
@@ -93,15 +106,8 @@ class UWGI(torch.utils.data.Dataset):
             print("Validation!")
             df = df[df.fold == fold]
 
-        # case_ids = df['case'].unique()
-        # self.images = []
-        # for case_id in case_ids:
-        #     images = glob.glob(f"{data_dir}/{case_id}/*/*_image.npy")
-        #     self.images += images
-
-        df['mask'] = df['mask'].apply(
-            lambda x: f"{data_dir}/{x}".replace("_mask", "_image"))
-        self.images = df['mask'].values
+        df['mask'] = df['mask'].apply(lambda x: f"{data_dir}/{x}")
+        self.masks = df['mask'].values
         if 'is_pseudo' in df.columns:
             self.is_pseudos = df['is_pseudo'].values
         else:
@@ -113,10 +119,10 @@ class UWGI(torch.utils.data.Dataset):
         self.is_train = is_train
 
     def __len__(self):
-        return len(self.images)
+        return len(self.masks)
 
-    def get_mask_multilabel(self, image):
-        mask = image.replace('_image', '_mask')
+    def get_mask_multilabel(self, mask):
+        # mask = image.replace('_image', '_mask')
         mask = np.load(mask)
         mask[mask != 0] = 1  # 3 x h x w
         # 0: large bowel
@@ -135,11 +141,11 @@ class UWGI(torch.utils.data.Dataset):
         mask = np.transpose(mask, (1, 2, 0))
         return mask
 
-    def get_mask_multiclass(self, image, is_pseudo=False):
+    def get_mask_multiclass(self, mask, is_pseudo=False):
         if is_pseudo and not self.infer_pseudo:
-            image = image.replace('uw-gi-25d', 'uw-gi-25d-pseudo')
+            mask = mask.replace('uw-gi-25d', 'uw-gi-25d-pseudo')
 
-        mask = image.replace('_image', '_mask')
+        # mask = image.replace('_image', '_mask')
         mask = np.load(mask)
         if not is_pseudo or self.infer_pseudo:
             mask = mask.max(axis=0)  # h x w
@@ -153,7 +159,7 @@ class UWGI(torch.utils.data.Dataset):
         return image_path.split("/")[-2]
 
     def get_slice(self, image_path):
-        return image_path.split("/")[-1]
+        return image_path.split("/")[-1].split('_')[1]
 
     def crop_roi(self, image, mask):
         channel = image[..., 1]
@@ -188,25 +194,54 @@ class UWGI(torch.utils.data.Dataset):
         all_channels = np.stack(all_channels, axis=-1).astype(np.float32)
         return all_channels
 
+    def load_slice(self, case_id, day, slice):
+        slice_dir = os.path.join(
+            self.image_dir,
+            case_id,
+            f"{case_id}_{day}",
+            'scans'
+        )
+        # print(slice_dir)
+        image = glob.glob(f"{slice_dir}/slice_{slice}_*.png")
+        assert len(image) <= 1
+        if len(image) == 0:
+            return None
+        else:
+            image = image[0]
+            image = cv2.imread(image, cv2.IMREAD_UNCHANGED)
+            return image
+
+    def load_image(self, case_id, day, slice):
+        anchor_slice = self.load_slice(case_id, day, slice)
+        anchor_slice = anchor_slice / anchor_slice.max()
+        image = np.stack([anchor_slice] * 3, axis=-1)
+        for s, i in zip([-self.stride, self.stride], [0, 2]):
+            slice_idx = int(slice) + s
+            slice_idx = str(slice_idx).zfill(4)
+            pos_slice = self.load_slice(case_id, day, slice_idx)
+            if pos_slice is None:
+                continue
+
+            pos_slice = pos_slice / pos_slice.max()
+            image[..., i] = pos_slice
+        return image
+
     def __getitem__(self, index):
-        image_path = self.images[index]
+        mask_path = self.masks[index]
         is_pseudo = self.is_pseudos[index]
         if self.multilabel:
-            mask = self.get_mask_multilabel(image_path)
+            mask = self.get_mask_multilabel(mask_path)
         else:
-            mask = self.get_mask_multiclass(image_path, is_pseudo)
+            mask = self.get_mask_multiclass(mask_path, is_pseudo)
 
-        image = np.load(image_path)
-        # image = self.organ_normalize(image)
+        case_id = self.get_case_id(mask_path)
+        day = self.get_day(mask_path)
+        slice = self.get_slice(mask_path)
+
+        image = self.load_image(case_id, day, slice)
+
         image_h, image_w = image.shape[:2]
-        image = image / image.max()
         image = image.astype(np.float32)
-
-        # if np.random.rand() < 0.5 and self.is_train:
-        #     image, mask = self.crop_roi(image, mask)
-
-        # image = image * 255
-        # image = image.astype(np.uint8)
 
         ret = self.transforms(image=image, mask=mask)
         image = ret['image']
@@ -222,10 +257,6 @@ class UWGI(torch.utils.data.Dataset):
             mask = np.transpose(mask, (2, 0, 1)).astype(np.float32)
         else:
             mask = mask.astype(np.int64)
-
-        case_id = self.get_case_id(image_path)
-        day = self.get_day(image_path)
-        slice = self.get_slice(image_path)
 
         return {
             'image': image,

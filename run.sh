@@ -15,17 +15,17 @@
 
 
 for model_name in FPN ; do
-    for fold in 0 ; do
+    for fold in 1 2 3 4 ; do
         make    fold=${fold} \
                 csv='csv/Unet_keep_0.5.csv' \
-                prefix='baseline_hard_aug_ema' \
+                prefix='baseline_hard_aug_ema_mc' \
                 log_prefix='logs_clean_3s' \
                 loss_weights='1,0,1' \
                 scheduler='cosine' \
                 backbone='timm-efficientnet-b5' \
                 epochs=30 \
                 input_size='512,512' \
-                num_classes=3 \
+                num_classes=4 \
                 batch_size=16 \
                 lr=1e-3 \
                 pretrained=True \
@@ -35,7 +35,7 @@ for model_name in FPN ; do
                 mmcfg='mmconfigs/segformer_mit_b3.py' \
                 model_name=${model_name} \
                 use_ema=True \
-                multilabel=True \
+                multilabel=False \
                 train
     done
 done

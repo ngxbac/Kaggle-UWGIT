@@ -3,6 +3,7 @@ import glob
 import torch
 import pandas as pd
 import albumentations as A
+import cv2
 
 
 def get_transform(dataset='train', image_sizes=[320, 384]):
@@ -31,8 +32,8 @@ def get_transform(dataset='train', image_sizes=[320, 384]):
 
 class CHAOS(torch.utils.data.Dataset):
     def __init__(self, transforms=None, is_test=False):
-        data_dir_0 = 'data/CHAOS/Train_Sets_npy/MR/1/T1DUAL/DICOM_anon/InPhase'
-        data_dir_1 = 'data/CHAOS/Test_Sets_npy/MR/1/T1DUAL/DICOM_anon/InPhase'
+        data_dir_0 = 'data/CHAOS/Train_Sets_npy/'
+        data_dir_1 = 'data/CHAOS/Test_Sets_npy/'
 
         self.images = []
         for data_dir in [data_dir_0, data_dir_1]:
@@ -49,7 +50,10 @@ class CHAOS(torch.utils.data.Dataset):
             return np.zeros((512, 512, 3))
         else:
             mask = image.replace('DICOM_anon', 'mask')
-            mask = np.load(mask)
+            mask = np.load(mask) # 3 x 512 x 512
+            mask = mask > 0.5
+            mask = np.transpose(mask, (1, 2, 0))
+            mask = mask.astype(np.uint8)
 
         return mask
 
@@ -60,18 +64,28 @@ class CHAOS(torch.utils.data.Dataset):
 
         image = np.load(image_path)
         image = image / image.max()
+        image = image.astype(np.float32)
         image = np.stack((image, image, image), axis=-1).astype(np.float32)
+        image = cv2.resize(image, (512, 512))
 
         ret = self.transforms(image=image, mask=mask)
         image = ret['image']
         mask = ret['mask']
 
-        mask = mask.astype(np.float32)
+        is_empty = mask.sum() == 0
+        is_empty = np.array([is_empty]).astype(np.float32)
+
         mask = np.transpose(mask, (2, 0, 1)).astype(np.float32)
         image = np.transpose(image, (2, 0, 1)).astype(np.float32)
 
         return {
             'image': image,
             'target': mask,
-            'img_path': image_path
+            'img_path': image_path,
+            'empty': is_empty,
+            'case_id': 'chaos',
+            'day': 'chaos',
+            'h': 512,
+            'w': 512,
+            'slice': 'chaos'
         }

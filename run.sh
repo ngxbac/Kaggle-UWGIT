@@ -15,18 +15,18 @@
 
 
 for model_name in FPN ; do
-    for fold in 1 2 3 4 ; do
+    for fold in 0 1 2 3 4 ; do
         make    fold=${fold} \
                 csv='csv/Unet_keep_0.5.csv' \
-                prefix='baseline_hard_aug_ema_mc' \
-                log_prefix='logs_clean_3s' \
+                prefix='baseline_hard_aug_ema' \
+                log_prefix='logs_chaos_pseudo' \
                 loss_weights='1,0,1' \
                 scheduler='cosine' \
                 backbone='timm-efficientnet-b5' \
                 epochs=30 \
                 input_size='512,512' \
-                num_classes=4 \
-                batch_size=16 \
+                num_classes=3 \
+                batch_size=32 \
                 lr=1e-3 \
                 pretrained=True \
                 dataset='uw-gi' \
@@ -35,7 +35,7 @@ for model_name in FPN ; do
                 mmcfg='mmconfigs/segformer_mit_b3.py' \
                 model_name=${model_name} \
                 use_ema=True \
-                multilabel=False \
+                multilabel=True \
                 train
     done
 done

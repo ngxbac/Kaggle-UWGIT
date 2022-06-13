@@ -248,6 +248,9 @@ def get_uw_gi_dataset(args, name='train'):
             infer_pseudo=args.pseudo
         )
 
+        chaos_dataset = CHAOS(train_transform, False)
+        train_dataset = torch.utils.data.ConcatDataset([train_dataset, chaos_dataset])
+
         train_sampler = torch.utils.data.DistributedSampler(
             train_dataset, shuffle=True) if args.distributed else None
         train_data_loader = torch.utils.data.DataLoader(
@@ -689,6 +692,8 @@ def predict_pseudo(args):
     print("\n".join("%s: %s" % (k, str(v))
           for k, v in sorted(dict(vars(args)).items())))
     cudnn.benchmark = True
+
+    args.distributed = False
 
     # ============ preparing data ... ============
     if args.dataset in ['uw-gi', 'chaos']:

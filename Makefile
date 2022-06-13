@@ -58,7 +58,7 @@ train:
 	--scheduler ${scheduler} \
 	--pred ${pred} \
 	--mmcfg ${mmcfg} \
-	--use_fp16 False
+	--use_fp16 True
 
 valid:
 	PYTHONPATH=. CUDA_VISIBLE_DEVICES=0 python scripts/main_25d.py \

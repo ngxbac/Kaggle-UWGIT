@@ -242,5 +242,6 @@ class UWGI(torch.utils.data.Dataset):
             'day': day,
             'h': image_h,
             'w': image_w,
-            'slice': slice
+            'slice': slice,
+            'img_path': image_path,
         }

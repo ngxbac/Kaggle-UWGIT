@@ -16,12 +16,11 @@ from utils import dino as utils
 import timm
 from datasets.uw_gi import UWGI, get_transform
 from datasets.abdomen import Abdomen
+from datasets.chaos import CHAOS
 import segmentation_models_pytorch as smp
 from criterions.segmentation import criterion_2d, dice_coef, iou_coef, ComboLoss
 from models.mmmodels import get_mmseg_models
 from schedulers import OneCycleLRWithWarmup
-# from models.TransUNet.networks.vit_seg_modeling import VisionTransformer as ViT_seg
-# from models.TransUNet.networks.vit_seg_modeling import CONFIGS as CONFIGS_ViT_seg
 
 
 def get_args_parser():
@@ -204,6 +203,35 @@ def get_abdomen_dataset(args):
     return train_data_loader
 
 
+def get_chaos_dataset(args, name='train'):
+    image_sizes = [int(x) for x in args.input_size.split(",")]
+    train_transform = get_transform('train', image_sizes)
+    valid_transform = get_transform('valid', image_sizes)
+
+    if name == 'train':
+        transform = train_transform
+        is_test = False
+    else:
+        transform = valid_transform
+        is_test = True
+
+    train_dataset = CHAOS(transform, is_test)
+
+    train_sampler = torch.utils.data.DistributedSampler(
+        train_dataset, shuffle=True) if args.distributed else None
+    train_data_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        sampler=train_sampler,
+        batch_size=args.batch_size_per_gpu,
+        num_workers=args.num_workers,
+        pin_memory=True,
+        drop_last=False,
+        shuffle=train_sampler is None,
+    )
+    print(f"Train data loaded: there are {len(train_dataset)} images.")
+    return train_data_loader
+
+
 def get_uw_gi_dataset(args, name='train'):
     image_sizes = [int(x) for x in args.input_size.split(",")]
     train_transform = get_transform('train', image_sizes)
@@ -265,6 +293,8 @@ def get_uw_gi_dataset(args, name='train'):
 def get_dataset(args, name='train'):
     if args.dataset == 'uw-gi':
         return get_uw_gi_dataset(args, name)
+    elif args.dataset == 'chaos':
+        return get_chaos_dataset(args, name)
     elif args.dataset == 'abdomen':
         return get_abdomen_dataset(args)
 
@@ -661,7 +691,7 @@ def predict_pseudo(args):
     cudnn.benchmark = True
 
     # ============ preparing data ... ============
-    if args.dataset == 'uw-gi':
+    if args.dataset in ['uw-gi', 'chaos']:
         valid_loader = get_dataset(args, name='valid')
     else:
         return
@@ -686,31 +716,24 @@ def predict_pseudo(args):
 
     from tqdm import tqdm
 
-    save_dir = "data/uw-gi-25d-pseudo/"
     for batch in tqdm(valid_loader, total=len(valid_loader)):
         images = batch['image'].cuda(non_blocking=True)
-        hs, ws = batch['h'], batch['w']
-        cases, days, slices = batch['case_id'], batch['day'], batch['slice']
+        img_paths = batch['img_path']
 
         with torch.no_grad():
             logits = 0
             for model in models:
-                logits += model(images)
+                logits += model(images).sigmoid()
             logits = logits / len(models)
-            logits = logits.argmax(1)
 
         batch_size = images.shape[0]
         for i in range(batch_size):
-            h, w = hs[i].item(), ws[i].item()
+            img_path = img_paths[i]
             pred = logits[i].detach().cpu().numpy()  # 512 x 512
-            pred = cv2.resize(pred.astype(np.uint8), (w, h),
-                              interpolation=cv2.INTER_NEAREST)
-            case, day, slice = cases[i], days[i], slices[i]
-            save_dir_ = f"{save_dir}/{case}/{day}"
-            os.makedirs(save_dir_, exist_ok=True)
-            slice = slice.replace('image', 'mask')
-            save_file = f"{save_dir_}/{slice}"
-            np.save(save_file, pred)
+            mask = img_path.replace('DICOM_anon', 'mask')
+            save_dir = "/".join(mask.split("/")[:-1])
+            os.makedirs(save_dir, exist_ok=True)
+            np.save(mask, pred)
 
 
 if __name__ == '__main__':

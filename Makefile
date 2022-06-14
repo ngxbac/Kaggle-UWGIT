@@ -9,6 +9,7 @@ resume=''
 loss_weights=''
 scheduler='onecycle'
 lr=1e-4
+min_lr=0
 num_classes=4
 use_ema=False
 model_name='FPN'
@@ -54,11 +55,12 @@ train:
 	--pretrained ${pretrained} \
 	--pretrained_checkpoint ${pretrained_checkpoint} \
 	--lr ${lr} \
+	--min_lr ${min_lr} \
 	--loss_weights ${loss_weights} \
 	--scheduler ${scheduler} \
 	--pred ${pred} \
 	--mmcfg ${mmcfg} \
-	--use_fp16 False
+	--use_fp16 True
 
 valid:
 	PYTHONPATH=. CUDA_VISIBLE_DEVICES=0 python scripts/main_25d.py \

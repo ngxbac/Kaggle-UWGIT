@@ -61,6 +61,7 @@ def get_args_parser():
     parser.add_argument("--lr", default=2e-3, type=float, help="""Learning rate at the end of
         linear warmup (highest LR used during training). The learning rate is linearly scaled
         with the batch size, and specified here for a reference batch size of 256.""")
+    parser.add_argument("--min_lr", default=0.0, type=float)
     parser.add_argument('--scheduler', default='cosine', type=str)
 
     # Misc
@@ -248,6 +249,9 @@ def get_uw_gi_dataset(args, name='train'):
             infer_pseudo=args.pseudo
         )
 
+        # chaos_dataset = CHAOS(train_transform, False)
+        # train_dataset = torch.utils.data.ConcatDataset([train_dataset, chaos_dataset])
+
         train_sampler = torch.utils.data.DistributedSampler(
             train_dataset, shuffle=True) if args.distributed else None
         train_data_loader = torch.utils.data.DataLoader(
@@ -301,7 +305,14 @@ def get_dataset(args, name='train'):
 
 def load_pretrained_checkpoint(model, path):
     current_state_dict = model.state_dict()
-    checkpoint = torch.load(path, map_location='cpu')['model']
+    checkpoint = torch.load(path, map_location='cpu')
+    if 'ema' in checkpoint:
+        print("[+] Load EMA weight")
+        checkpoint = checkpoint['ema']
+    elif 'model' in checkpoint:
+        print("[+] Load model weight")
+        checkpoint = checkpoint['model']
+
     for k in current_state_dict.keys():
         if current_state_dict[k].shape == checkpoint[k].shape:
             current_state_dict[k] = checkpoint[k]
@@ -408,13 +419,13 @@ def train(args):
     )
 
     # ============ preparing optimizer ... ============
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr,
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr,
                                   weight_decay=args.weight_decay)
 
     total_steps = args.epochs * len(train_loader)
     if args.scheduler == 'cosine':
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=total_steps, eta_min=0)
+            optimizer, T_max=total_steps, eta_min=args.min_lr)
     elif args.scheduler == 'onecycle':
         scheduler = OneCycleLRWithWarmup(
             optimizer=optimizer,
@@ -690,6 +701,8 @@ def predict_pseudo(args):
           for k, v in sorted(dict(vars(args)).items())))
     cudnn.benchmark = True
 
+    args.distributed = False
+
     # ============ preparing data ... ============
     if args.dataset in ['uw-gi', 'chaos']:
         valid_loader = get_dataset(args, name='valid')
@@ -745,4 +758,5 @@ if __name__ == '__main__':
     elif args.pseudo:
         predict_pseudo(args)
     else:
+        # Train phase one
         train(args)

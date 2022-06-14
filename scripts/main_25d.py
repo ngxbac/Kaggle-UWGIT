@@ -419,7 +419,7 @@ def train(args):
     )
 
     # ============ preparing optimizer ... ============
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr,
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr,
                                   weight_decay=args.weight_decay)
 
     total_steps = args.epochs * len(train_loader)

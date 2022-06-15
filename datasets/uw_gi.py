@@ -17,7 +17,7 @@ def get_transform(dataset='train', image_sizes=[320, 384]):
                     scale=(0.8, 1.0),
                     ratio=(0.75, 1.3333333333333333),
                     interpolation=1, p=1.0),
-            ]),
+            ], p=1.0),
             A.HorizontalFlip(p=0.5),
             A.VerticalFlip(p=0.5),
             A.ShiftScaleRotate(shift_limit=0.0625,
@@ -124,7 +124,7 @@ class UWGI(torch.utils.data.Dataset):
         if 'is_pseudo' in df.columns:
             self.is_pseudos = df['is_pseudo'].values
         else:
-            self.is_pseudos = [False] * len(df)
+            self.is_pseudos = [False] * len(self.images)
 
         self.transforms = transforms
         self.multilabel = multilabel

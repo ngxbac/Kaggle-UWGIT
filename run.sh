@@ -16,21 +16,21 @@
 
 prefix=./logs_multistages/FPN/0/timm-efficientnet-b5_is512,512_bs32_e20_stage_1
 
-for model_name in UnetPlusPlus ; do
+for model_name in FPN ; do
     for fold in 0 1 2 3 4 ; do
         make    fold=${fold} \
-                csv='csv/Unet_keep_0.5.csv' \
+                csv='train_valid_case.csv' \
                 prefix='stage_1' \
-                log_prefix='logs_dice_bce' \
+                log_prefix='logs_full' \
                 loss_weights='1,0,1' \
                 scheduler='cosine' \
-                backbone='tu-ig_resnext101_32x48d' \
+                backbone='timm-efficientnet-b5' \
                 epochs=30 \
                 input_size='512,512' \
                 num_classes=3 \
                 batch_size=32 \
                 lr=1e-3 \
-                min_lr=1e-5 \
+                min_lr=0 \
                 pretrained=True \
                 dataset='uw-gi' \
                 data_dir='data/uw-gi-25d' \

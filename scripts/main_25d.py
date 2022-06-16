@@ -97,19 +97,19 @@ class Criterion(nn.Module):
         )
 
         self.aux = args.aux
-
         self.aux_loss = nn.BCEWithLogitsLoss()
 
-    def forward(self, logits, targets):
-        if args.aux:
-            masks, auxs = logits
-            gt_masks, gt_auxs = targets
-            seg_loss = self.seg_loss(masks, gt_masks)
-            aux_loss = self.aux_loss(auxs, gt_auxs)
-            return (seg_loss + aux_loss) / 2
-        else:
-            return self.seg_loss(logits, targets)
+    def forward(self, logits, batch):
+        logits, logits_deeps, logits_clf = logits
+        targets = batch['target'].cuda(non_blocking=True)
+        empty = batch['empty'].cuda(non_blocking=True)
 
+        loss = self.seg_loss(logits, targets)
+        loss += self.aux_loss(logits_clf, empty)
+        for logits_deep in logits_deeps:
+            loss += 0.1 * self.seg_loss(logits_deep, targets)
+
+        return loss
 
 class Metric:
     def __init__(self, multilabel=True, aux=False):
@@ -151,7 +151,10 @@ class Metric:
 
         return metric_dict
 
-    def __call__(self, logits, targets):
+    def __call__(self, logits, batch):
+        logits, logits_deeps, logits_clf = logits
+        targets = batch['target'].cuda(non_blocking=True)
+
         ret_dict = {}
 
         if self.aux:
@@ -331,6 +334,18 @@ def get_model(args, distributed=True):
             f"nvidia/mit-{args.backbone}",
             num_labels=args.num_classes
         )
+    elif args.model_name == 'unet_resnet':
+        from models.unet_resnet import build_model
+        model = build_model(
+            num_classes=args.num_classes,
+            model_name='seresnext101',
+            resolution=(None, None),
+            deepsupervision=True,
+            clfhead=True,
+            clf_threshold=None,
+            load_weights=True
+        )
+
     elif 'mmseg' in args.model_name and os.path.isfile(args.mmcfg):
         from models.mmmodels import get_mmseg_models
         model = get_mmseg_models(args)
@@ -605,14 +620,14 @@ def train_one_epoch(
             else:
                 logits = model(images)
 
-            logits = nn.functional.interpolate(
-                input=logits,
-                size=targets.shape[-2:],
-                mode='bilinear',
-                align_corners=False)
+            # logits = nn.functional.interpolate(
+            #     input=logits,
+            #     size=targets.shape[-2:],
+            #     mode='bilinear',
+            #     align_corners=False)
 
-            loss = criterion(logits, targets)
-            metric_dict = metric_fn(logits, targets)
+            loss = criterion(logits, batch)
+            metric_dict = metric_fn(logits, batch)
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)

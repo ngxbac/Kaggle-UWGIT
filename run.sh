@@ -16,7 +16,7 @@
 
 prefix=./logs_multistages/FPN/0/timm-efficientnet-b5_is512,512_bs32_e20_stage_1
 
-for model_name in FPN ; do
+for model_name in UnetPlusPlus ; do
     for fold in 0 1 2 3 4 ; do
         make    fold=${fold} \
                 csv='train_valid_case.csv' \
@@ -28,7 +28,7 @@ for model_name in FPN ; do
                 epochs=30 \
                 input_size='512,512' \
                 num_classes=3 \
-                batch_size=32 \
+                batch_size=24 \
                 lr=1e-3 \
                 min_lr=0 \
                 pretrained=True \

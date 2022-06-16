@@ -19,7 +19,6 @@ from datasets.abdomen import Abdomen
 from datasets.chaos import CHAOS
 import segmentation_models_pytorch as smp
 from criterions.segmentation import criterion_2d, dice_coef, iou_coef, ComboLoss
-from models.mmmodels import get_mmseg_models
 from schedulers import OneCycleLRWithWarmup
 
 
@@ -333,6 +332,7 @@ def get_model(args, distributed=True):
             num_labels=args.num_classes
         )
     elif 'mmseg' in args.model_name and os.path.isfile(args.mmcfg):
+        from models.mmmodels import get_mmseg_models
         model = get_mmseg_models(args)
     else:
         if args.aux:

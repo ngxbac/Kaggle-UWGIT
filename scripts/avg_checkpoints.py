@@ -50,10 +50,10 @@ def checkpoint_metric(checkpoint_path):
 
 def load_state_dict(ckpt, no_ema):
     if no_ema:
-        state_dict = torch.load(ckpt)['model']
+        state_dict = torch.load(ckpt, map_location=torch.device('cpu'))['model']
     else:
         print("Load ema ")
-        state_dict = torch.load(ckpt)['ema']
+        state_dict = torch.load(ckpt, map_location=torch.device('cpu'))['ema']
 
     return state_dict
 

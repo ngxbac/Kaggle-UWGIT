@@ -16,19 +16,19 @@
 
 prefix=./logs_multistages/FPN/0/timm-efficientnet-b5_is512,512_bs32_e20_stage_1
 
-for model_name in FPN ; do
+for model_name in Unet ; do
     for fold in 3 4 ; do
         make    fold=${fold} \
                 csv='train_valid_case.csv' \
-                prefix='fp32' \
+                prefix='fp32_cbam_ds_hyper' \
                 log_prefix='logs_full' \
                 loss_weights='1,0,1' \
                 scheduler='cosine' \
                 backbone='timm-efficientnet-b5' \
-                epochs=30 \
+                epochs=15 \
                 input_size='512,512' \
                 num_classes=3 \
-                batch_size=16 \
+                batch_size=8 \
                 lr=1e-3 \
                 min_lr=0 \
                 pretrained=True \

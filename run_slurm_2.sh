@@ -1,21 +1,21 @@
 #!/bin/bash
 
 # Parameters
-#SBATCH --nodes=4
+#SBATCH --ntasks=4
+#SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=32
 #SBATCH --gpus-per-node=1
 #SBATCH --job-name=test
-#SBATCH --ntasks-per-node=1
 #SBATCH --partition=agpu72
-#SBATCH --nodelist=c[2009,2108,2109,2110]
+#SBATCH --nodelist=c[2107-2110]
 
-export MASTER_PORT=12340
 export WORLD_SIZE=4
+export MASTER_PORT=$((12000 + $RANDOM % 20000))
+set -x
 
 
-### get the first node name as master address - customized for vgg slurm
-### e.g. master(gnodee[2-5],gnoded1) == gnodee2
+
 echo "NODELIST="${SLURM_NODELIST}
 master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
@@ -28,12 +28,12 @@ conda activate torch1.8
 
 
 # python
-fold=2
+fold=${1}
 backbone=timm-efficientnet-b5
-batch_size=16
+batch_size=8
 input_size=512,512
-epochs=30
-prefix='fp32'
+epochs=15
+prefix='fp32_cbam_ds_hyper'
 resume='no'
 loss_weights='1,0,1'
 scheduler='cosine'
@@ -41,7 +41,7 @@ lr=1e-3
 min_lr=0
 num_classes=3
 use_ema=True
-model_name='FPN'
+model_name='Unet'
 multilabel=True
 dataset='uw-gi'
 data_dir='data/uw-gi-25d'

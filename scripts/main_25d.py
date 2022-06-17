@@ -19,7 +19,7 @@ from datasets.uw_gi import UWGI, get_transform
 from datasets.abdomen import Abdomen
 from datasets.chaos import CHAOS
 import segmentation_models_pytorch as smp
-from criterions.segmentation import criterion_2d, dice_coef, iou_coef, ComboLoss
+from criterions.segmentation import criterion_2d, dice_coef, iou_coef, ComboLoss, criterion_lovasz_hinge_non_empty
 from schedulers import OneCycleLRWithWarmup
 
 
@@ -97,19 +97,21 @@ class Criterion(nn.Module):
             loss_weights[2]
         )
 
+        self.args = args
         self.aux = args.aux
-
         self.aux_loss = nn.BCEWithLogitsLoss()
 
     def forward(self, logits, targets):
-        if args.aux:
-            masks, auxs = logits
-            gt_masks, gt_auxs = targets
-            seg_loss = self.seg_loss(masks, gt_masks)
-            aux_loss = self.aux_loss(auxs, gt_auxs)
-            return (seg_loss + aux_loss) / 2
-        else:
-            return self.seg_loss(logits, targets)
+        main_logits, ds_logits = logits[0], logits[1:]
+        loss = self.seg_loss(main_logits, targets)
+        for ds_logit in ds_logits:
+            loss += 0.1 * criterion_lovasz_hinge_non_empty(
+                self.aux_loss,
+                ds_logit,
+                targets
+            )
+
+        return loss
 
 
 class Metric:
@@ -153,24 +155,13 @@ class Metric:
         return metric_dict
 
     def __call__(self, logits, targets):
+        main_logits = logits[0]
         ret_dict = {}
 
-        if self.aux:
-            masks, auxs = logits
-            gt_masks, gt_auxs = targets
-            f1_score = utils.f1_score(
-                auxs.sigmoid() > 0.5,
-                gt_auxs
-            )
-            ret_dict['f1'] = f1_score
-        else:
-            masks = logits
-            gt_masks = targets
-
         if self.multilabel:
-            ret = self.multilabel_metric(masks, gt_masks)
+            ret = self.multilabel_metric(main_logits, targets)
         else:
-            ret = self.multiclass_metric(masks, gt_masks)
+            ret = self.multiclass_metric(main_logits, targets)
 
         ret_dict.update(ret)
         return ret_dict
@@ -361,7 +352,10 @@ def get_model(args, distributed=True):
             classes=args.num_classes,
             in_channels=3,
             encoder_depth=encoder_depth,
-            aux_params=aux_params
+            aux_params=aux_params,
+            decoder_attention_type='cbam',
+            hyper_columns=True,
+            deepsupversion=True
         )
 
     print(model)
@@ -608,12 +602,6 @@ def train_one_epoch(
                     logits = model(images)
             else:
                 logits = model(images)
-
-            logits = nn.functional.interpolate(
-                input=logits,
-                size=targets.shape[-2:],
-                mode='bilinear',
-                align_corners=False)
 
             loss = criterion(logits, targets)
             metric_dict = metric_fn(logits, targets)

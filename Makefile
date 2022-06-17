@@ -60,7 +60,7 @@ train:
 	--scheduler ${scheduler} \
 	--pred ${pred} \
 	--mmcfg ${mmcfg} \
-	--use_fp16 True
+	--use_fp16 False
 
 valid:
 	PYTHONPATH=. CUDA_VISIBLE_DEVICES=0 python scripts/main_25d.py \
@@ -124,4 +124,4 @@ train_3d:
 	--res_block \
 	--resume ${resume} \
 	--lr ${lr} \
-	--use_fp16 True
+	--use_fp16 False

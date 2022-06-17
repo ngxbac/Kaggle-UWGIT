@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+sys.path.append(".")
 import datetime
 import time
 import math
@@ -391,6 +392,9 @@ def get_model(args, distributed=True):
 def train(args):
     # args.distributed = hasattr(args, 'gpu')
     args.distributed = True
+
+    if "WORLD_SIZE" in os.environ:
+        args.world_size = int(os.environ["WORLD_SIZE"])
 
     if args.distributed:
         utils.init_distributed_mode(args)

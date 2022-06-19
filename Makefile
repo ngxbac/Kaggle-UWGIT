@@ -1,3 +1,5 @@
+slurm_job_dir=/scratch/${SLURM_JOB_ID}/
+
 fold=0
 backbone=timm-efficientnet-b5
 batch_size=32
@@ -15,13 +17,13 @@ use_ema=False
 model_name='FPN'
 multilabel=False
 dataset='uw-gi'
-data_dir='data/uw-gi-25d'
+data_dir=/scratch/${SLURM_JOB_ID}/data/uw-gi-25d
 pretrained=True
 pretrained_checkpoint=''
 log_prefix='logs'
 pred=False
 csv=train_valid_case_clean.csv
-output_dir=./${log_prefix}/${model_name}/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}_${fold}
+output_dir=${slurm_job_dir}/${log_prefix}/${model_name}/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}_${fold}
 num_gpus=`nvidia-smi --list-gpus | wc -l`
 distributed=0
 mmcfg=mmconfigs/segformer_mit_b0.py

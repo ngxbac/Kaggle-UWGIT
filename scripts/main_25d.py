@@ -102,14 +102,17 @@ class Criterion(nn.Module):
         self.aux_loss = nn.BCEWithLogitsLoss()
 
     def forward(self, logits, targets):
-        main_logits, ds_logits = logits[0], logits[1:]
-        loss = self.seg_loss(main_logits, targets)
-        for ds_logit in ds_logits:
-            loss += 0.1 * criterion_lovasz_hinge_non_empty(
-                self.aux_loss,
-                ds_logit,
-                targets
-            )
+        if isinstance(logits, tuple) or isinstance(logits, list):
+            main_logits, ds_logits = logits[0], logits[1:]
+            loss = self.seg_loss(main_logits, targets)
+            for ds_logit in ds_logits:
+                loss += 0.1 * criterion_lovasz_hinge_non_empty(
+                    self.aux_loss,
+                    ds_logit,
+                    targets
+                )
+        else:
+            loss = self.seg_loss(logits, targets)
 
         return loss
 
@@ -155,7 +158,11 @@ class Metric:
         return metric_dict
 
     def __call__(self, logits, targets):
-        main_logits = logits[0]
+        if isinstance(logits, tuple) or isinstance(logits, list):
+            main_logits = logits[0]
+        else:
+            main_logits = logits
+
         ret_dict = {}
 
         if self.multilabel:
@@ -336,27 +343,32 @@ def get_model(args, distributed=True):
             )
         else:
             aux_params = None
+
+        params = {}
+        params['aux_params'] = aux_params
+
         encoder_weights = 'imagenet'
         encoder_depth = 5
 
-        decoder_channels = (1024, 512, 256, 128, 64)
         if 'timm-efficientnet' in args.backbone:
             encoder_weights = 'noisy-student'
         elif 'convnext' in args.backbone:
             encoder_weights = 'imagenet'
             encoder_depth = 4
 
-        model = smp.__dict__[args.model_name](
-            encoder_name=args.backbone,
-            encoder_weights=encoder_weights,
-            classes=args.num_classes,
-            in_channels=3,
-            encoder_depth=encoder_depth,
-            aux_params=aux_params,
-            decoder_attention_type='cbam',
-            hyper_columns=True,
-            deepsupversion=True
-        )
+        params['encoder_weights'] = encoder_weights
+        params['encoder_depth'] = encoder_depth
+        params['encoder_name'] = args.backbone
+        params['in_channels'] = 3
+        params['classes'] = args.num_classes
+
+        if args.model_name == 'Unet':
+            params['decoder_attention_type'] = 'cbam'
+            # params['hyper_columns'] = True
+            # params['deepsupversion'] = True
+
+
+        model = smp.__dict__[args.model_name](**params)
 
     print(model)
 

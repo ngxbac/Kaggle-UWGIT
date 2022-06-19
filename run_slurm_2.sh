@@ -4,16 +4,16 @@
 #SBATCH --ntasks=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=32
+#SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-node=1
 #SBATCH --job-name=test
 #SBATCH --partition=agpu72
-#SBATCH --nodelist=c[2107-2110]
+##SBATCH --nodelist=c[1905-1906,2005-2006]
+#SBATCH --nodelist=c[2007-2009,2107]
+#SBATCH --dependency=afterok:1217788
 
 export WORLD_SIZE=4
 export MASTER_PORT=$((12000 + $RANDOM % 20000))
-set -x
-
 
 
 echo "NODELIST="${SLURM_NODELIST}
@@ -26,14 +26,16 @@ module load cuda/11.1
 source ~/ondemand/miniconda3/etc/profile.d/conda.sh
 conda activate torch1.8
 
+slurm_job_dir=/scratch/$SLURM_JOB_ID/
+
 
 # python
 fold=${1}
-backbone=timm-efficientnet-b5
+backbone=resnet101
 batch_size=8
-input_size=512,512
-epochs=15
-prefix='fp32_cbam_ds_hyper'
+input_size=768,768
+epochs=30
+prefix='fp32'
 resume='no'
 loss_weights='1,0,1'
 scheduler='cosine'
@@ -41,16 +43,16 @@ lr=1e-3
 min_lr=0
 num_classes=3
 use_ema=True
-model_name='Unet'
+model_name='FPN'
 multilabel=True
 dataset='uw-gi'
-data_dir='data/uw-gi-25d'
+data_dir=/scr1/1217535/data/uw-gi-25d
 pretrained=True
 pretrained_checkpoint='no'
-log_prefix='logs_full'
+log_prefix=$slurm_job_dir/logs_cvpr
 pred=False
 csv=train_valid_case.csv
-output_dir=./${log_prefix}/${model_name}/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}_${fold}
+output_dir=${log_prefix}/${model_name}/${backbone}_is${input_size}_bs${batch_size}_e${epochs}_${prefix}_${fold}
 mmcfg=mmconfigs/segformer_mit_b0.py
 
 
@@ -79,3 +81,4 @@ srun python -u scripts/main_25d.py \
 	--pred ${pred} \
 	--use_fp16 False
 
+rsync -av $log_prefix logs_cvpr

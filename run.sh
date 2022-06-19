@@ -17,23 +17,23 @@
 prefix=./logs_multistages/FPN/0/timm-efficientnet-b5_is512,512_bs32_e20_stage_1
 
 for model_name in Unet ; do
-    for fold in 3 4 ; do
+    for fold in 0 1 2 3 4 ; do
         make    fold=${fold} \
                 csv='train_valid_case.csv' \
-                prefix='fp32_cbam_ds_hyper' \
-                log_prefix='logs_full' \
+                prefix='cbam' \
+                log_prefix='logs_cvpr' \
                 loss_weights='1,0,1' \
                 scheduler='cosine' \
-                backbone='timm-efficientnet-b5' \
-                epochs=15 \
-                input_size='512,512' \
+                backbone='efficientnet-b5' \
+                epochs=30 \
+                input_size='768,768' \
                 num_classes=3 \
                 batch_size=8 \
                 lr=1e-3 \
                 min_lr=0 \
                 pretrained=True \
+                data_dir=/scratch/$SLURM_JOB_ID/data/uw-gi-25d/ \
                 dataset='uw-gi' \
-                data_dir='data/uw-gi-25d' \
                 pretrained_checkpoint='no' \
                 mmcfg='mmconfigs/segformer_mit_b3.py' \
                 model_name=${model_name} \
